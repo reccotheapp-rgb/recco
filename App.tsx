@@ -3,7 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   Animated,
@@ -19,6 +19,7 @@ import {
   TextInput,
   ToastAndroid,
   View,
+  useWindowDimensions,
 } from "react-native";
 import {
   continueItems,
@@ -752,8 +753,12 @@ function SwipeDeck({
   const seenIds = useRef(new Set<string>());
   const nextPage = useRef(2);
   const loadingPage = useRef(false);
+  const resetAfterSwipe = useRef(false);
+  const swipeInFlight = useRef(false);
+  const { height: viewportHeight } = useWindowDimensions();
   const item = queue[index];
   const next = queue[index + 1];
+  const deckHeight = Platform.OS === "web" ? 390 : Math.min(500, Math.max(390, viewportHeight * 0.58));
   useEffect(() => {
     seenIds.current = new Set();
     nextPage.current = 2;
@@ -787,18 +792,30 @@ function SwipeDeck({
         setLoadingMore(false);
       });
   }, [index, queue.length]);
-  const advance = (save: boolean) =>
+  useEffect(() => {
+    if (next?.image) Image.prefetch(next.image).catch(() => undefined);
+  }, [next?.image]);
+  useLayoutEffect(() => {
+    if (!resetAfterSwipe.current) return;
+    card.setValue({ x: 0, y: 0 });
+    resetAfterSwipe.current = false;
+    swipeInFlight.current = false;
+  }, [index, card]);
+  const advance = (save: boolean) => {
+    if (!item || swipeInFlight.current) return;
+    swipeInFlight.current = true;
     Animated.timing(card, {
       toValue: { x: save ? 500 : -500, y: 25 },
       duration: 180,
       useNativeDriver: true,
     }).start(() => {
-      if (item && save) onSave(item.id);
-      else if (item) onPass(item.id);
-      if (item) seenIds.current.add(item.id);
-      card.setValue({ x: 0, y: 0 });
+      if (save) onSave(item.id);
+      else onPass(item.id);
+      seenIds.current.add(item.id);
+      resetAfterSwipe.current = true;
       setIndex((value) => value + 1);
     });
+  };
   const pan = useMemo(
     () =>
       PanResponder.create({
@@ -870,7 +887,7 @@ function SwipeDeck({
       </View>
       <Text style={styles.swipeTitle}>Build your{`\n`}taste profile.</Text>
       <Text style={styles.swipeHint}>{loadingMore ? "Finding more titles…" : "Right to save · left to pass"}</Text>
-      <View style={styles.deck}>
+      <View style={[styles.deck, { height: deckHeight }]}>
         <View style={styles.nextDeckCard}>
           {next && <Image source={{ uri: next.image }} style={styles.deckImage} />}
         </View>
@@ -1880,7 +1897,7 @@ const styles = StyleSheet.create({
     marginTop: 18,
   },
   swipeHint: { color: C.muted, fontSize: 12, marginTop: 7, marginBottom: 19 },
-  deck: { height: Platform.OS === "web" ? 294 : 360, position: "relative" },
+  deck: { position: "relative" },
   nextDeckCard: {
     position: "absolute",
     left: 10,
