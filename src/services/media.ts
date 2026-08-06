@@ -1,7 +1,28 @@
 import { appConfig } from "../config/env";
 import type { MediaItem } from "../types/media";
+import { getCatalogAccessToken } from "./supabase";
 
 type MediaSearchResponse = { results: MediaItem[] };
+
+async function mediaCatalog(
+  action: "discover" | "search" | "details",
+  params: Record<string, string> = {},
+) {
+  const token = await getCatalogAccessToken();
+  if (!token) throw new Error("Recco could not start a secure session.");
+  const query = new URLSearchParams({ action, ...params });
+  const response = await fetch(
+    `${appConfig.supabaseUrl}/functions/v1/media-catalog?${query.toString()}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        apikey: appConfig.supabasePublishableKey,
+      },
+    },
+  );
+  if (!response.ok) throw new Error("Recco's media service is temporarily unavailable.");
+  return response.json() as Promise<unknown>;
+}
 
 export type TitleDetails = {
   overview: string;
@@ -26,25 +47,16 @@ export type TitleDetails = {
 export async function searchMedia(query: string): Promise<MediaItem[]> {
   if (!query.trim()) return [];
 
-  const endpoint = appConfig.apiUrl
-    ? `${appConfig.apiUrl}/tmdb-search`
-    : "/api/tmdb-search";
-  const response = await fetch(
-    `${endpoint}?q=${encodeURIComponent(query.trim())}`,
-  );
-  if (!response.ok) throw new Error("Media search is temporarily unavailable.");
-
-  const data = (await response.json()) as MediaSearchResponse;
+  const data = (await mediaCatalog("search", { q: query.trim() })) as MediaSearchResponse;
   return data.results;
 }
 
 export async function getTrendingMedia(page = 1): Promise<MediaItem[]> {
-  const endpoint = appConfig.apiUrl
-    ? `${appConfig.apiUrl}/tmdb-discover`
-    : "/api/tmdb-discover";
-  const response = await fetch(`${endpoint}?page=${page}`);
-  if (!response.ok) return [];
-  return ((await response.json()) as MediaSearchResponse).results;
+  try {
+    return ((await mediaCatalog("discover", { page: String(page) })) as MediaSearchResponse).results;
+  } catch {
+    return [];
+  }
 }
 
 export async function getTitleDetails(
@@ -53,12 +65,7 @@ export async function getTitleDetails(
 ): Promise<TitleDetails | null> {
   const match = /^tmdb-(movie|tv)-(\d+)$/.exec(item.id);
   if (!match) return null;
-  const endpoint = appConfig.apiUrl
-    ? `${appConfig.apiUrl}/tmdb-details`
-    : "/api/tmdb-details";
-  const params = new URLSearchParams({ type: match[1], id: match[2] });
-  if (season) params.set("season", String(season));
-  const response = await fetch(`${endpoint}?${params.toString()}`);
-  if (!response.ok) throw new Error("Title details are unavailable.");
-  return (await response.json()) as TitleDetails;
+  const params: Record<string, string> = { type: match[1], id: match[2] };
+  if (season) params.season = String(season);
+  return (await mediaCatalog("details", params)) as TitleDetails;
 }

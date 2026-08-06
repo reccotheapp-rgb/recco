@@ -24,6 +24,13 @@ export async function ensureGuestSession() {
   return data.user;
 }
 
+export async function getCatalogAccessToken() {
+  const user = await ensureGuestSession();
+  if (!supabase || !user) return null;
+  const { data } = await supabase.auth.getSession();
+  return data.session?.access_token ?? null;
+}
+
 export type MediaStatus = "SAVED" | "IN_PROGRESS" | "COMPLETED" | "PAUSED" | "DROPPED";
 
 type MediaSyncOptions = {
