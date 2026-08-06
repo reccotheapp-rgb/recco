@@ -38,11 +38,11 @@ export async function searchMedia(query: string): Promise<MediaItem[]> {
   return data.results;
 }
 
-export async function getTrendingMedia(): Promise<MediaItem[]> {
+export async function getTrendingMedia(page = 1): Promise<MediaItem[]> {
   const endpoint = appConfig.apiUrl
     ? `${appConfig.apiUrl}/tmdb-discover`
     : "/api/tmdb-discover";
-  const response = await fetch(endpoint);
+  const response = await fetch(`${endpoint}?page=${page}`);
   if (!response.ok) return [];
   return ((await response.json()) as MediaSearchResponse).results;
 }

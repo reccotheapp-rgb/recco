@@ -8,4 +8,5 @@ export type MediaItem = {
   year: string;
   image: string;
   note: string;
+  score?: number;
 };

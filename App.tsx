@@ -737,17 +737,34 @@ function SwipeDeck({
   onPass: (id: string) => void;
 }) {
   const [index, setIndex] = useState(0);
+  const [queue, setQueue] = useState<Media[]>(items);
+  const [loadingMore, setLoadingMore] = useState(true);
   const card = useRef(new Animated.ValueXY()).current;
-  const item = items[index % items.length];
-  const next = items[(index + 1) % items.length];
+  const item = queue[index];
+  const next = queue[index + 1];
+  useEffect(() => {
+    setQueue(items);
+    setIndex(0);
+    setLoadingMore(true);
+    Promise.all([getTrendingMedia(2), getTrendingMedia(3)])
+      .then((pages) => {
+        setQueue((current) => {
+          const unique = new Map(current.map((entry) => [entry.id, entry]));
+          pages.flat().forEach((entry) => unique.set(entry.id, entry));
+          return [...unique.values()];
+        });
+      })
+      .catch(() => undefined)
+      .finally(() => setLoadingMore(false));
+  }, [items]);
   const advance = (save: boolean) =>
     Animated.timing(card, {
       toValue: { x: save ? 500 : -500, y: 25 },
       duration: 180,
       useNativeDriver: true,
     }).start(() => {
-      if (save) onSave(item.id);
-      else onPass(item.id);
+      if (item && save) onSave(item.id);
+      else if (item) onPass(item.id);
       card.setValue({ x: 0, y: 0 });
       setIndex((value) => value + 1);
     });
@@ -770,7 +787,7 @@ function SwipeDeck({
                   bounciness: 7,
                 }).start(),
       }),
-    [item.id],
+    [item?.id],
   );
   const tilt = card.x.interpolate({
     inputRange: [-250, 0, 250],
@@ -786,6 +803,30 @@ function SwipeDeck({
     outputRange: [1, 0.55, 0],
     extrapolate: "clamp",
   });
+  if (!item) {
+    return (
+      <View style={styles.swipePage}>
+        <View style={styles.swipeHeader}>
+          <Tap onPress={onClose} style={styles.swipeClose}>
+            <Ionicons name="close" size={20} color={C.ivory} />
+          </Tap>
+          <Text style={styles.heroEyebrow}>TASTE CURATION</Text>
+        </View>
+        <View style={styles.swipeDone}>
+          <View style={styles.swipeDoneIcon}>
+            <Ionicons name="sparkles" size={31} color={C.ink} />
+          </View>
+          <Text style={styles.swipeDoneTitle}>Taste updated.</Text>
+          <Text style={styles.swipeDoneText}>
+            You curated {queue.length} live titles. Your saved picks are in Library.
+          </Text>
+          <Tap onPress={onClose} style={styles.doneButton}>
+            <Text style={styles.primaryText}>See my library</Text>
+          </Tap>
+        </View>
+      </View>
+    );
+  }
   return (
     <View style={styles.swipePage}>
       <View style={styles.swipeHeader}>
@@ -795,16 +836,15 @@ function SwipeDeck({
         <View>
           <Text style={styles.heroEyebrow}>TASTE CURATION</Text>
           <Text style={styles.swipeCount}>
-            {String((index % items.length) + 1).padStart(2, "0")} /{" "}
-            {String(items.length).padStart(2, "0")}
+            {String(index + 1).padStart(2, "0")} / {String(queue.length).padStart(2, "0")}
           </Text>
         </View>
       </View>
-      <Text style={styles.swipeTitle}>Trust your{`\n`}taste.</Text>
-      <Text style={styles.swipeHint}>Swipe right to keep, left to pass.</Text>
+      <Text style={styles.swipeTitle}>Build your{`\n`}taste profile.</Text>
+      <Text style={styles.swipeHint}>{loadingMore ? "Finding more titles…" : "Right to save · left to pass"}</Text>
       <View style={styles.deck}>
         <View style={styles.nextDeckCard}>
-          <Image source={{ uri: next.image }} style={styles.deckImage} />
+          {next && <Image source={{ uri: next.image }} style={styles.deckImage} />}
         </View>
         <Animated.View
           {...pan.panHandlers}
@@ -845,6 +885,10 @@ function SwipeDeck({
           <View style={styles.deckInfo}>
             <Text style={styles.mediaKind}>{item.kind}</Text>
             <Text style={styles.deckTitle}>{item.title}</Text>
+            <View style={styles.deckFacts}>
+              {item.score ? <Text style={styles.deckScore}>★ {item.score.toFixed(1)}</Text> : null}
+              <Text style={styles.deckMeta}>{item.kind === "SHOW" ? "Series" : "Film"}</Text>
+            </View>
             <Text style={styles.deckMeta}>
               {item.by} · {item.year}
             </Text>
@@ -1805,10 +1849,10 @@ const styles = StyleSheet.create({
     lineHeight: 37,
     letterSpacing: -1.8,
     fontWeight: "900",
-    marginTop: 25,
+    marginTop: 18,
   },
   swipeHint: { color: C.muted, fontSize: 12, marginTop: 7, marginBottom: 19 },
-  deck: { height: Platform.OS === "web" ? 294 : 390, position: "relative" },
+  deck: { height: Platform.OS === "web" ? 294 : 360, position: "relative" },
   nextDeckCard: {
     position: "absolute",
     left: 10,
@@ -1865,7 +1909,9 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: -1,
   },
-  deckMeta: { color: "#D2D8D4", fontSize: 12, marginTop: 4 },
+  deckFacts: { flexDirection: "row", alignItems: "center", gap: 9, marginTop: 5 },
+  deckMeta: { color: "#D2D8D4", fontSize: 12 },
+  deckScore: { color: C.teal, fontSize: 12, fontWeight: "900" },
   deckNote: { color: "#B9C2BD", fontSize: 11, lineHeight: 15, marginTop: 10 },
   swipeActions: {
     flexDirection: "row",
@@ -1892,4 +1938,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  swipeDone: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, paddingBottom: 80 },
+  swipeDoneIcon: { width: 72, height: 72, borderRadius: 36, backgroundColor: C.teal, alignItems: "center", justifyContent: "center" },
+  swipeDoneTitle: { color: C.ivory, fontSize: 30, fontWeight: "900", letterSpacing: -1, marginTop: 20 },
+  swipeDoneText: { color: C.muted, textAlign: "center", fontSize: 13, lineHeight: 19, marginTop: 9 },
+  doneButton: { marginTop: 23, backgroundColor: C.teal, borderRadius: 13, paddingHorizontal: 18, paddingVertical: 13 },
 });
