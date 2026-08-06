@@ -1,5 +1,5 @@
-import { appConfig } from '../config/env';
-import type { MediaItem } from '../types/media';
+import { appConfig } from "../config/env";
+import type { MediaItem } from "../types/media";
 
 type MediaSearchResponse = { results: MediaItem[] };
 
@@ -8,11 +8,16 @@ type MediaSearchResponse = { results: MediaItem[] };
  * directly or include a TMDB credential in the compiled app.
  */
 export async function searchMedia(query: string): Promise<MediaItem[]> {
-  if (!appConfig.apiUrl || !query.trim()) return [];
+  if (!query.trim()) return [];
 
-  const response = await fetch(`${appConfig.apiUrl}/tmdb-search?q=${encodeURIComponent(query.trim())}`);
-  if (!response.ok) throw new Error('Media search is temporarily unavailable.');
+  const endpoint = appConfig.apiUrl
+    ? `${appConfig.apiUrl}/tmdb-search`
+    : "/api/tmdb-search";
+  const response = await fetch(
+    `${endpoint}?q=${encodeURIComponent(query.trim())}`,
+  );
+  if (!response.ok) throw new Error("Media search is temporarily unavailable.");
 
-  const data = await response.json() as MediaSearchResponse;
+  const data = (await response.json()) as MediaSearchResponse;
   return data.results;
 }

@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Image,
@@ -23,6 +23,7 @@ import {
   upcomingItems,
 } from "./src/data/media";
 import type { MediaItem as Media, MediaKind as Kind } from "./src/types/media";
+import { searchMedia } from "./src/services/media";
 
 type Tab = "Home" | "Discover" | "Search" | "Library" | "Profile";
 const allMedia = [...picks, ...continueItems, ...upcomingItems];
@@ -80,6 +81,8 @@ export default function App() {
   });
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"ALL" | Kind>("ALL");
+  const [remoteResults, setRemoteResults] = useState<Media[]>([]);
+  const [searching, setSearching] = useState(false);
   const [onboarding, setOnboarding] = useState(true);
   const [curating, setCurating] = useState(false);
   const buzz = () =>
@@ -113,6 +116,31 @@ export default function App() {
       ),
     [filter, query],
   );
+  useEffect(() => {
+    if (query.trim().length < 2) {
+      setRemoteResults([]);
+      setSearching(false);
+      return;
+    }
+    let active = true;
+    const timeout = setTimeout(() => {
+      setSearching(true);
+      searchMedia(query)
+        .then((items) => {
+          if (active) setRemoteResults(items);
+        })
+        .catch(() => {
+          if (active) setRemoteResults([]);
+        })
+        .finally(() => {
+          if (active) setSearching(false);
+        });
+    }, 350);
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+    };
+  }, [query]);
 
   const Header = ({ label }: { label?: string }) => (
     <View style={styles.header}>
@@ -324,10 +352,14 @@ export default function App() {
         />
       </View>
       <Text style={styles.resultLabel}>
-        {query ? `${results.length} RESULTS` : "START EXPLORING"}
+        {searching
+          ? "SEARCHING TMDB..."
+          : query
+            ? `${remoteResults.length} RESULTS`
+            : "START EXPLORING"}
       </Text>
       <View style={styles.searchResults}>
-        {results.map((item) => (
+        {(query ? remoteResults : results).map((item) => (
           <Tap
             key={item.id}
             onPress={() => open(item)}
