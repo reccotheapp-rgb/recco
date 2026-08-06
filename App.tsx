@@ -17,6 +17,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  ToastAndroid,
   View,
 } from "react-native";
 import {
@@ -93,6 +94,7 @@ export default function App() {
 
 function ReccoApp() {
   const insets = useSafeAreaInsets();
+  const lastBackPress = useRef(0);
   const [tab, setTab] = useState<Tab>("Home");
   const [selected, setSelected] = useState<Media | null>(null);
   const [saved, setSaved] = useState<string[]>([]);
@@ -255,7 +257,13 @@ function ReccoApp() {
         setTab("Home");
         return true;
       }
-      return false;
+      const now = Date.now();
+      if (now - lastBackPress.current < 2000) return false;
+      lastBackPress.current = now;
+      if (Platform.OS === "android") {
+        ToastAndroid.show("Press back again to exit Recco", ToastAndroid.SHORT);
+      }
+      return true;
     });
     return () => subscription.remove();
   }, [curating, onboarding, selected, tab]);
