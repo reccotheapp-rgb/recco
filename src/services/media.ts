@@ -52,11 +52,7 @@ export async function searchMedia(query: string): Promise<MediaItem[]> {
 }
 
 export async function getTrendingMedia(page = 1): Promise<MediaItem[]> {
-  try {
-    return ((await mediaCatalog("discover", { page: String(page) })) as MediaSearchResponse).results;
-  } catch {
-    return [];
-  }
+  return ((await mediaCatalog("discover", { page: String(page) })) as MediaSearchResponse).results;
 }
 
 export async function getTitleDetails(

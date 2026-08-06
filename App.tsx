@@ -9,6 +9,7 @@ import {
   Animated,
   BackHandler,
   Image,
+  KeyboardAvoidingView,
   PanResponder,
   Platform,
   Pressable,
@@ -418,7 +419,7 @@ function ReccoApp() {
       contentContainerStyle={styles.scroll}
     >
       <Header label="DISCOVER" />
-      <Tap onPress={() => trending.length && setCurating(true)} style={styles.curationCard}>
+      <Tap onPress={() => setCurating(true)} style={styles.curationCard}>
         <View>
           <Text style={styles.heroEyebrow}>TASTE CURATION</Text>
           <Text style={styles.curationTitle}>Teach Recco{`\n`}your taste.</Text>
@@ -474,8 +475,13 @@ function ReccoApp() {
     </ScrollView>
   );
   const Search = () => (
+    <KeyboardAvoidingView
+      style={styles.searchPage}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
     <ScrollView
-      keyboardShouldPersistTaps="handled"
+      keyboardShouldPersistTaps="always"
+      keyboardDismissMode="on-drag"
       contentContainerStyle={styles.scroll}
     >
       <Header label="SEARCH" />
@@ -488,6 +494,9 @@ function ReccoApp() {
           onChangeText={setQuery}
           placeholder="Titles, people, artists..."
           placeholderTextColor={C.muted}
+          autoCorrect={false}
+          autoCapitalize="none"
+          returnKeyType="search"
           style={styles.searchInput}
         />
       </View>
@@ -518,6 +527,7 @@ function ReccoApp() {
         ))}
       </View>
     </ScrollView>
+    </KeyboardAvoidingView>
   );
   const Library = () => (
     <ScrollView
@@ -609,7 +619,7 @@ function ReccoApp() {
     ) : tab === "Discover" ? (
       <Discover />
     ) : tab === "Search" ? (
-      <Search />
+      Search()
     ) : tab === "Library" ? (
       <Library />
     ) : (
@@ -651,7 +661,7 @@ function ReccoApp() {
             }
           />
         )}
-        {curating && trending.length > 0 && (
+        {curating && (
           <SwipeDeck
             items={trending}
             onClose={() => setCurating(false)}
@@ -749,6 +759,8 @@ function SwipeDeck({
   const [index, setIndex] = useState(0);
   const [queue, setQueue] = useState<Media[]>(items);
   const [loadingMore, setLoadingMore] = useState(true);
+  const [deckError, setDeckError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const card = useRef(new Animated.ValueXY()).current;
   const seenIds = useRef(new Set<string>());
   const nextPage = useRef(2);
@@ -761,10 +773,11 @@ function SwipeDeck({
   const deckHeight = Platform.OS === "web" ? 390 : Math.min(500, Math.max(390, viewportHeight * 0.58));
   useEffect(() => {
     seenIds.current = new Set();
-    nextPage.current = 2;
+    nextPage.current = items.length ? 2 : 1;
     setQueue(items);
     setIndex(0);
     setLoadingMore(true);
+    setDeckError(false);
     loadSwipeHistory()
       .then((history) => {
         seenIds.current = new Set(history);
@@ -774,7 +787,7 @@ function SwipeDeck({
       .finally(() => setLoadingMore(false));
   }, [items]);
   useEffect(() => {
-    if (queue.length - index > 5 || loadingPage.current) return;
+    if (queue.length - index > 5 || loadingPage.current || deckError) return;
     loadingPage.current = true;
     setLoadingMore(true);
     const page = nextPage.current++;
@@ -786,12 +799,13 @@ function SwipeDeck({
           return [...current, ...fresh];
         });
       })
-      .catch(() => undefined)
+      .catch(() => setDeckError(true))
       .finally(() => {
         loadingPage.current = false;
         setLoadingMore(false);
+        setLoadAttempt((attempt) => attempt + 1);
       });
-  }, [index, queue.length]);
+  }, [deckError, index, loadAttempt, queue.length]);
   useEffect(() => {
     if (next?.image) Image.prefetch(next.image).catch(() => undefined);
   }, [next?.image]);
@@ -864,10 +878,27 @@ function SwipeDeck({
           <View style={styles.swipeDoneIcon}>
             <Ionicons name="sparkles" size={31} color={C.ink} />
           </View>
-          <Text style={styles.swipeDoneTitle}>Finding your next match.</Text>
-          <Text style={styles.swipeDoneText}>
-            Your keep/pass choices are shaping what Recco brings you next.
+          <Text style={styles.swipeDoneTitle}>
+            {deckError ? "Could not load titles." : "Loading your deck."}
           </Text>
+          <Text style={styles.swipeDoneText}>
+            {deckError
+              ? "Check your connection, then try again."
+              : "Getting real films and series from TMDB for you."}
+          </Text>
+          {deckError && (
+            <Tap
+              onPress={() => {
+                nextPage.current = 1;
+                setDeckError(false);
+                setLoadingMore(true);
+                setLoadAttempt((attempt) => attempt + 1);
+              }}
+              style={styles.doneButton}
+            >
+              <Text style={styles.doneButtonText}>TRY AGAIN</Text>
+            </Tap>
+          )}
         </View>
       </View>
     );
@@ -1499,6 +1530,7 @@ const styles = StyleSheet.create({
     borderColor: C.line,
   },
   searchInput: { flex: 1, color: C.ivory, fontSize: 14, height: "100%" },
+  searchPage: { flex: 1 },
   resultLabel: {
     color: C.muted,
     fontSize: 9,
@@ -1988,4 +2020,5 @@ const styles = StyleSheet.create({
   swipeDoneTitle: { color: C.ivory, fontSize: 30, fontWeight: "900", letterSpacing: -1, marginTop: 20 },
   swipeDoneText: { color: C.muted, textAlign: "center", fontSize: 13, lineHeight: 19, marginTop: 9 },
   doneButton: { marginTop: 23, backgroundColor: C.teal, borderRadius: 13, paddingHorizontal: 18, paddingVertical: 13 },
+  doneButtonText: { color: C.ink, fontSize: 12, fontWeight: "900", letterSpacing: 0.8 },
 });
