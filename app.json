@@ -12,6 +12,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.reccotheapp.recco",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
