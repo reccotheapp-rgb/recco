@@ -25,6 +25,7 @@ import {
 } from "./src/data/media";
 import type { MediaItem as Media, MediaKind as Kind } from "./src/types/media";
 import { searchMedia } from "./src/services/media";
+import { ensureGuestSession, syncMediaState } from "./src/services/supabase";
 
 type Tab = "Home" | "Discover" | "Search" | "Library" | "Profile";
 const allMedia = [...picks, ...continueItems, ...upcomingItems];
@@ -101,12 +102,25 @@ export default function App() {
     setSaved((items) =>
       items.includes(id) ? items.filter((item) => item !== id) : [...items, id],
     );
+    const item =
+      selected?.id === id
+        ? selected
+        : allMedia.find((media) => media.id === id);
+    if (item) void syncMediaState(item, "SAVED").catch(() => undefined);
   };
   const track = (id: string) => {
     buzz();
     setTracked((items) =>
       items.includes(id) ? items.filter((item) => item !== id) : [...items, id],
     );
+    const item =
+      selected?.id === id
+        ? selected
+        : allMedia.find((media) => media.id === id);
+    if (item)
+      void syncMediaState(item, "IN_PROGRESS", rating[id]).catch(
+        () => undefined,
+      );
   };
   const results = useMemo(
     () =>
@@ -119,6 +133,9 @@ export default function App() {
       ),
     [filter, query],
   );
+  useEffect(() => {
+    void ensureGuestSession().catch(() => undefined);
+  }, []);
   useEffect(() => {
     AsyncStorage.getItem("recco-library-v1")
       .then((raw) => {

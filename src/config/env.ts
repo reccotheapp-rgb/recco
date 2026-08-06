@@ -3,5 +3,8 @@
  * TMDB credentials remain in Supabase Edge Function secrets.
  */
 export const appConfig = {
-  apiUrl: process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') ?? '',
+  apiUrl: process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, "") ?? "",
+  supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL ?? "",
+  supabasePublishableKey:
+    process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "",
 };
