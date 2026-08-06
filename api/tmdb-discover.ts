@@ -9,7 +9,7 @@ export default async function handler(
     return response.status(405).json({ error: "Method not allowed" });
   if (!token) return response.status(503).json({ results: [] });
   const page = Math.min(
-    3,
+    100,
     Math.max(1, Number(typeof request.query.page === "string" ? request.query.page : 1) || 1),
   );
   const upstream = await fetch(

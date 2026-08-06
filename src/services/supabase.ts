@@ -95,6 +95,18 @@ export async function syncSwipeAction(mediaId: string, action: "KEEP" | "PASS") 
   if (error) throw error;
 }
 
+export async function loadSwipeHistory(): Promise<string[]> {
+  const user = await ensureGuestSession();
+  if (!supabase || !user) return [];
+  const { data, error } = await supabase
+    .from("swipe_actions")
+    .select("media_id")
+    .order("created_at", { ascending: false })
+    .limit(2000);
+  if (error) throw error;
+  return (data ?? []).map((entry) => entry.media_id);
+}
+
 export async function loadEpisodeReviews(
   mediaId: string,
   seasonNumber: number,

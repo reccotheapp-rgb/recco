@@ -31,6 +31,7 @@ import {
   ensureGuestSession,
   loadEpisodeReviews,
   loadMediaStates,
+  loadSwipeHistory,
   saveEpisodeReview,
   syncMediaState,
   syncSwipeAction,
@@ -740,23 +741,44 @@ function SwipeDeck({
   const [queue, setQueue] = useState<Media[]>(items);
   const [loadingMore, setLoadingMore] = useState(true);
   const card = useRef(new Animated.ValueXY()).current;
+  const seenIds = useRef(new Set<string>());
+  const nextPage = useRef(2);
+  const loadingPage = useRef(false);
   const item = queue[index];
   const next = queue[index + 1];
   useEffect(() => {
+    seenIds.current = new Set();
+    nextPage.current = 2;
     setQueue(items);
     setIndex(0);
     setLoadingMore(true);
-    Promise.all([getTrendingMedia(2), getTrendingMedia(3)])
-      .then((pages) => {
-        setQueue((current) => {
-          const unique = new Map(current.map((entry) => [entry.id, entry]));
-          pages.flat().forEach((entry) => unique.set(entry.id, entry));
-          return [...unique.values()];
-        });
+    loadSwipeHistory()
+      .then((history) => {
+        seenIds.current = new Set(history);
+        setQueue((current) => current.filter((entry) => !seenIds.current.has(entry.id)));
       })
       .catch(() => undefined)
       .finally(() => setLoadingMore(false));
   }, [items]);
+  useEffect(() => {
+    if (queue.length - index > 5 || loadingPage.current) return;
+    loadingPage.current = true;
+    setLoadingMore(true);
+    const page = nextPage.current++;
+    getTrendingMedia(page)
+      .then((incoming) => {
+        setQueue((current) => {
+          const queued = new Set(current.map((entry) => entry.id));
+          const fresh = incoming.filter((entry) => !queued.has(entry.id) && !seenIds.current.has(entry.id));
+          return [...current, ...fresh];
+        });
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        loadingPage.current = false;
+        setLoadingMore(false);
+      });
+  }, [index, queue.length]);
   const advance = (save: boolean) =>
     Animated.timing(card, {
       toValue: { x: save ? 500 : -500, y: 25 },
@@ -765,6 +787,7 @@ function SwipeDeck({
     }).start(() => {
       if (item && save) onSave(item.id);
       else if (item) onPass(item.id);
+      if (item) seenIds.current.add(item.id);
       card.setValue({ x: 0, y: 0 });
       setIndex((value) => value + 1);
     });
@@ -816,13 +839,10 @@ function SwipeDeck({
           <View style={styles.swipeDoneIcon}>
             <Ionicons name="sparkles" size={31} color={C.ink} />
           </View>
-          <Text style={styles.swipeDoneTitle}>Taste updated.</Text>
+          <Text style={styles.swipeDoneTitle}>Finding your next match.</Text>
           <Text style={styles.swipeDoneText}>
-            You curated {queue.length} live titles. Your saved picks are in Library.
+            Your keep/pass choices are shaping what Recco brings you next.
           </Text>
-          <Tap onPress={onClose} style={styles.doneButton}>
-            <Text style={styles.primaryText}>See my library</Text>
-          </Tap>
         </View>
       </View>
     );
