@@ -22,6 +22,12 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "26243ec6-0a27-435e-9edc-6c018d9d0086"
+      }
+    },
+    "owner": "marlowdagoats-team"
   }
 }
