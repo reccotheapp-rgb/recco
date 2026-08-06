@@ -123,16 +123,17 @@ export default function App() {
         () => undefined,
       );
   };
+  const liveCatalog = trending.length ? trending : allMedia;
   const results = useMemo(
     () =>
-      allMedia.filter(
+      liveCatalog.filter(
         (item) =>
           (filter === "ALL" || item.kind === filter) &&
           `${item.title} ${item.by}`
             .toLowerCase()
             .includes(query.toLowerCase()),
       ),
-    [filter, query],
+    [filter, query, liveCatalog],
   );
   useEffect(() => {
     void ensureGuestSession().catch(() => undefined);
@@ -287,30 +288,34 @@ export default function App() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.rail}
         >
-          {continueItems.map((item) => (
-            <View key={item.id}>
-              <Poster item={item} />
-              <Text numberOfLines={1} style={styles.railTitle}>
-                {item.title}
-              </Text>
-              <Text style={styles.railMeta}>{item.by}</Text>
-              <View style={styles.progress}>
-                <View
-                  style={[
-                    styles.progressFill,
-                    { width: item.kind === "SHOW" ? "62%" : "44%" },
-                  ]}
-                />
+          {(trending.length ? trending.slice(1, 4) : continueItems).map(
+            (item) => (
+              <View key={item.id}>
+                <Poster item={item} />
+                <Text numberOfLines={1} style={styles.railTitle}>
+                  {item.title}
+                </Text>
+                <Text style={styles.railMeta}>{item.by}</Text>
+                <View style={styles.progress}>
+                  <View
+                    style={[
+                      styles.progressFill,
+                      { width: item.kind === "SHOW" ? "62%" : "44%" },
+                    ]}
+                  />
+                </View>
               </View>
-            </View>
-          ))}
+            ),
+          )}
         </ScrollView>
       </Section>
       <Section title="Inspired by your taste">
         <View style={styles.wall}>
-          {picks.slice(1).map((item) => (
-            <Poster item={item} key={item.id} />
-          ))}
+          {(trending.length ? trending.slice(4, 8) : picks.slice(1)).map(
+            (item) => (
+              <Poster item={item} key={item.id} />
+            ),
+          )}
         </View>
       </Section>
       <Section title="From your circle">
