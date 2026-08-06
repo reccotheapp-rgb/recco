@@ -1,11 +1,13 @@
 {
   "expo": {
-    "name": "recco",
+    "name": "Recco",
     "slug": "recco",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "description": "Your media life, all in one place.",
+    "scheme": "recco",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true
     },
