@@ -98,6 +98,7 @@ export default function App() {
 function ReccoApp() {
   const insets = useSafeAreaInsets();
   const lastBackPress = useRef(0);
+  const pageTransition = useRef(new Animated.Value(1)).current;
   const [tab, setTab] = useState<Tab>("Home");
   const [selected, setSelected] = useState<Media | null>(null);
   const [saved, setSaved] = useState<string[]>([]);
@@ -270,6 +271,14 @@ function ReccoApp() {
     });
     return () => subscription.remove();
   }, [curating, onboarding, selected, tab]);
+  useEffect(() => {
+    pageTransition.setValue(0);
+    Animated.timing(pageTransition, {
+      toValue: 1,
+      duration: 210,
+      useNativeDriver: true,
+    }).start();
+  }, [pageTransition, tab]);
 
   const Header = ({ label }: { label?: string }) => (
     <View style={styles.header}>
@@ -552,25 +561,39 @@ function ReccoApp() {
         </Tap>
       </View>
       <Section title="On your shelves">
+        <View style={styles.libraryGrid}>
         {shelfItems.map((item) => (
             <Tap
               key={item.id}
               onPress={() => open(item)}
-              style={styles.libraryRow}
+              style={styles.libraryCard}
             >
-              <Image source={{ uri: item.image }} style={styles.libraryImage} />
-              <View style={{ flex: 1 }}>
+              <Image source={{ uri: item.image }} style={styles.libraryCardImage} />
+              <LinearGradient
+                colors={["transparent", "rgba(5,9,8,.96)"]}
+                style={styles.posterShade}
+              />
+              <View style={styles.libraryCardTop}>
                 <Text style={styles.mediaKind}>
                   {tracked.includes(item.id)
                     ? "IN PROGRESS"
                     : "SAVED FOR LATER"}
                 </Text>
-                <Text style={styles.searchTitle}>{item.title}</Text>
-                <Text style={styles.searchMeta}>{item.by}</Text>
               </View>
-              <Ionicons name="chevron-forward" size={18} color={C.muted} />
+              <View style={styles.libraryCardInfo}>
+                <Text numberOfLines={2} style={styles.libraryCardTitle}>{item.title}</Text>
+                <Text numberOfLines={1} style={styles.libraryCardMeta}>
+                  {item.kind === "SHOW" ? "Series" : "Film"} · {item.year || item.by}
+                </Text>
+                {tracked.includes(item.id) && (
+                  <View style={styles.libraryProgress}>
+                    <View style={styles.libraryProgressFill} />
+                  </View>
+                )}
+              </View>
             </Tap>
           ))}
+        </View>
         {!shelfItems.length && (
           <Tap onPress={() => setTab("Discover")} style={styles.emptyShelf}>
             <Ionicons name="bookmark-outline" size={25} color={C.teal} />
@@ -616,21 +639,31 @@ function ReccoApp() {
   );
   const page =
     tab === "Home" ? (
-      <Home />
+      Home()
     ) : tab === "Discover" ? (
-      <Discover />
+      Discover()
     ) : tab === "Search" ? (
       Search()
     ) : tab === "Library" ? (
-      <Library />
+      Library()
     ) : (
-      <Profile />
+      Profile()
     );
   return (
     <View style={styles.canvas}>
       <SafeAreaView style={styles.app}>
         <StatusBar style="light" />
-        <View style={styles.stage}>{page}</View>
+        <Animated.View
+          style={[
+            styles.stage,
+            {
+              opacity: pageTransition,
+              transform: [{ translateY: pageTransition.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }],
+            },
+          ]}
+        >
+          {page}
+        </Animated.View>
         <Nav
           active={tab}
           bottomInset={insets.bottom}
@@ -1605,21 +1638,30 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  libraryRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    backgroundColor: C.surface,
-    borderRadius: 16,
-    padding: 9,
-    marginBottom: 9,
-  },
-  libraryImage: {
-    width: 52,
-    height: 66,
-    borderRadius: 10,
+  libraryGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  libraryCard: {
+    width: "48%",
+    height: 252,
+    borderRadius: 18,
+    overflow: "hidden",
     backgroundColor: C.surface2,
   },
+  libraryCardImage: { width: "100%", height: "100%" },
+  libraryCardTop: {
+    position: "absolute",
+    top: 10,
+    left: 10,
+    alignSelf: "flex-start",
+    paddingHorizontal: 7,
+    paddingVertical: 5,
+    borderRadius: 10,
+    backgroundColor: "rgba(10,17,15,.78)",
+  },
+  libraryCardInfo: { position: "absolute", left: 11, right: 11, bottom: 11 },
+  libraryCardTitle: { color: "#FFF", fontSize: 16, lineHeight: 18, fontWeight: "900", letterSpacing: -0.4 },
+  libraryCardMeta: { color: "#CFD6D1", fontSize: 10, marginTop: 4 },
+  libraryProgress: { height: 3, borderRadius: 2, backgroundColor: "rgba(255,255,255,.25)", marginTop: 9 },
+  libraryProgressFill: { width: "62%", height: 3, borderRadius: 2, backgroundColor: C.teal },
   profile: { alignItems: "center", marginVertical: 12 },
   profileAvatar: {
     width: 86,
