@@ -60,8 +60,9 @@ function Tap({
 }) {
   const scale = useRef(new Animated.Value(1)).current;
   return (
-    <Animated.View style={[style, { transform: [{ scale }] }]}>
+    <Animated.View style={{ transform: [{ scale }] }}>
       <Pressable
+        style={style}
         onPress={onPress}
         onPressIn={() =>
           Animated.spring(scale, {
@@ -920,7 +921,22 @@ function SwipeDeck({
       <Text style={styles.swipeHint}>{loadingMore ? "Finding more titles…" : "Right to save · left to pass"}</Text>
       <View style={[styles.deck, { height: deckHeight }]}>
         <View style={styles.nextDeckCard}>
-          {next && <Image source={{ uri: next.image }} style={styles.deckImage} />}
+          {next && (
+            <>
+              <Image source={{ uri: next.image }} style={styles.deckImage} />
+              <LinearGradient
+                colors={["transparent", "rgba(4,8,7,.96)"]}
+                style={styles.posterShade}
+              />
+              <View style={styles.nextDeckInfo}>
+                <Text style={styles.mediaKind}>{next.kind}</Text>
+                <Text numberOfLines={2} style={styles.nextDeckTitle}>{next.title}</Text>
+                <Text numberOfLines={1} style={styles.nextDeckMeta}>
+                  {next.score ? `★ ${next.score.toFixed(1)} · ` : ""}{next.kind === "SHOW" ? "Series" : "Film"} · {next.year}
+                </Text>
+              </View>
+            </>
+          )}
         </View>
         <Animated.View
           {...pan.panHandlers}
@@ -1940,6 +1956,9 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     opacity: 0.42,
   },
+  nextDeckInfo: { position: "absolute", left: 18, right: 18, bottom: 18 },
+  nextDeckTitle: { color: "#FFF", fontSize: 26, lineHeight: 28, fontWeight: "900", letterSpacing: -0.8 },
+  nextDeckMeta: { color: "#D2D8D4", fontSize: 12, marginTop: 5 },
   deckCard: {
     position: "absolute",
     inset: 0,
