@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
@@ -79,6 +80,8 @@ export default function App() {
   const [rating, setRating] = useState<Record<string, number>>({
     severance: 5,
   });
+  const [completed, setCompleted] = useState<string[]>([]);
+  const [hydrated, setHydrated] = useState(false);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"ALL" | Kind>("ALL");
   const [remoteResults, setRemoteResults] = useState<Media[]>([]);
@@ -116,6 +119,31 @@ export default function App() {
       ),
     [filter, query],
   );
+  useEffect(() => {
+    AsyncStorage.getItem("recco-library-v1")
+      .then((raw) => {
+        if (!raw) return;
+        const data = JSON.parse(raw) as {
+          saved?: string[];
+          tracked?: string[];
+          rating?: Record<string, number>;
+          completed?: string[];
+        };
+        setSaved(data.saved ?? []);
+        setTracked(data.tracked ?? []);
+        setRating(data.rating ?? {});
+        setCompleted(data.completed ?? []);
+      })
+      .catch(() => undefined)
+      .finally(() => setHydrated(true));
+  }, []);
+  useEffect(() => {
+    if (!hydrated) return;
+    void AsyncStorage.setItem(
+      "recco-library-v1",
+      JSON.stringify({ saved, tracked, rating, completed }),
+    );
+  }, [saved, tracked, rating, completed, hydrated]);
   useEffect(() => {
     if (query.trim().length < 2) {
       setRemoteResults([]);
