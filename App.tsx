@@ -86,11 +86,10 @@ function ReccoApp() {
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>("Home");
   const [selected, setSelected] = useState<Media | null>(null);
-  const [saved, setSaved] = useState<string[]>(["after-yang"]);
-  const [tracked, setTracked] = useState<string[]>(["severance", "klara"]);
-  const [rating, setRating] = useState<Record<string, number>>({
-    severance: 5,
-  });
+  const [saved, setSaved] = useState<string[]>([]);
+  const [tracked, setTracked] = useState<string[]>([]);
+  const [rating, setRating] = useState<Record<string, number>>({});
+  const [libraryItems, setLibraryItems] = useState<Record<string, Media>>({});
   const [completed, setCompleted] = useState<string[]>([]);
   const [episodeProgress, setEpisodeProgress] = useState<Record<string, boolean>>({});
   const [hydrated, setHydrated] = useState(false);
@@ -107,17 +106,20 @@ function ReccoApp() {
     );
   const open = (item: Media) => {
     buzz();
+    setLibraryItems((items) => ({ ...items, [item.id]: item }));
     setSelected(item);
   };
+  const findItem = (id: string) =>
+    selected?.id === id
+      ? selected
+      : libraryItems[id] ?? trending.find((item) => item.id === id) ?? allMedia.find((item) => item.id === id);
   const save = (id: string) => {
     buzz();
     setSaved((items) =>
       items.includes(id) ? items.filter((item) => item !== id) : [...items, id],
     );
-    const item =
-      selected?.id === id
-        ? selected
-        : allMedia.find((media) => media.id === id);
+    const item = findItem(id);
+    if (item) setLibraryItems((items) => ({ ...items, [item.id]: item }));
     if (item) void syncMediaState(item, "SAVED").catch(() => undefined);
   };
   const track = (id: string) => {
@@ -125,16 +127,18 @@ function ReccoApp() {
     setTracked((items) =>
       items.includes(id) ? items.filter((item) => item !== id) : [...items, id],
     );
-    const item =
-      selected?.id === id
-        ? selected
-        : allMedia.find((media) => media.id === id);
+    const item = findItem(id);
+    if (item) setLibraryItems((items) => ({ ...items, [item.id]: item }));
     if (item)
       void syncMediaState(item, "IN_PROGRESS", rating[id]).catch(
         () => undefined,
       );
   };
   const liveCatalog = trending.length ? trending : allMedia;
+  const shelfItems = Object.values(libraryItems).filter(
+    (item) => saved.includes(item.id) || tracked.includes(item.id),
+  );
+  const trackingItems = shelfItems.filter((item) => tracked.includes(item.id));
   const results = useMemo(
     () =>
       liveCatalog.filter(
@@ -162,12 +166,14 @@ function ReccoApp() {
           rating?: Record<string, number>;
           completed?: string[];
           episodeProgress?: Record<string, boolean>;
+          libraryItems?: Record<string, Media>;
         };
         setSaved(data.saved ?? []);
         setTracked(data.tracked ?? []);
         setRating(data.rating ?? {});
         setCompleted(data.completed ?? []);
         setEpisodeProgress(data.episodeProgress ?? {});
+        setLibraryItems(data.libraryItems ?? {});
       })
       .catch(() => undefined)
       .finally(() => setHydrated(true));
@@ -176,9 +182,9 @@ function ReccoApp() {
     if (!hydrated) return;
     void AsyncStorage.setItem(
       "recco-library-v1",
-      JSON.stringify({ saved, tracked, rating, completed, episodeProgress }),
+      JSON.stringify({ saved, tracked, rating, completed, episodeProgress, libraryItems }),
     );
-  }, [saved, tracked, rating, completed, episodeProgress, hydrated]);
+  }, [saved, tracked, rating, completed, episodeProgress, libraryItems, hydrated]);
   useEffect(() => {
     if (query.trim().length < 2) {
       setRemoteResults([]);
@@ -295,13 +301,13 @@ function ReccoApp() {
           </View>
         </View>
       </Tap>
-      <Section title="Continue tracking" action="VIEW ALL">
+      <Section title={trackingItems.length ? "Continue tracking" : "Start tracking"} action="VIEW LIBRARY">
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.rail}
         >
-          {(trending.length ? trending.slice(1, 4) : continueItems).map(
+          {(trackingItems.length ? trackingItems : trending.slice(1, 4)).map(
             (item) => (
               <View key={item.id}>
                 <Poster item={item} />
@@ -322,7 +328,7 @@ function ReccoApp() {
           )}
         </ScrollView>
       </Section>
-      <Section title="Inspired by your taste">
+      <Section title="Trending this week">
         <View style={styles.wall}>
           {(trending.length ? trending.slice(4, 8) : picks.slice(1)).map(
             (item) => (
@@ -354,12 +360,12 @@ function ReccoApp() {
       contentContainerStyle={styles.scroll}
     >
       <Header label="DISCOVER" />
-      <Tap onPress={() => setCurating(true)} style={styles.curationCard}>
+      <Tap onPress={() => trending.length && setCurating(true)} style={styles.curationCard}>
         <View>
           <Text style={styles.heroEyebrow}>TASTE CURATION</Text>
           <Text style={styles.curationTitle}>Teach Recco{`\n`}your taste.</Text>
           <Text style={styles.curationText}>
-            Swipe through handpicked titles.
+            Swipe through real films and series from TMDB.
           </Text>
         </View>
         <View style={styles.curationIcon}>
@@ -477,11 +483,7 @@ function ReccoApp() {
         </Tap>
       </View>
       <Section title="On your shelves">
-        {allMedia
-          .filter(
-            (item) => tracked.includes(item.id) || saved.includes(item.id),
-          )
-          .map((item) => (
+        {shelfItems.map((item) => (
             <Tap
               key={item.id}
               onPress={() => open(item)}
@@ -500,6 +502,13 @@ function ReccoApp() {
               <Ionicons name="chevron-forward" size={18} color={C.muted} />
             </Tap>
           ))}
+        {!shelfItems.length && (
+          <Tap onPress={() => setTab("Discover")} style={styles.emptyShelf}>
+            <Ionicons name="bookmark-outline" size={25} color={C.teal} />
+            <Text style={styles.emptyTitle}>Your library is ready</Text>
+            <Text style={styles.emptyText}>Save a film or start tracking a show to build your archive.</Text>
+          </Tap>
+        )}
       </Section>
     </ScrollView>
   );
@@ -511,16 +520,16 @@ function ReccoApp() {
       <Header label="PROFILE" />
       <View style={styles.profile}>
         <View style={styles.profileAvatar}>
-          <Text style={styles.profileInitials}>NS</Text>
+          <Ionicons name="person" size={32} color={C.ink} />
         </View>
-        <Text style={styles.profileName}>Nastia S.</Text>
-        <Text style={styles.profileHandle}>@nastia</Text>
+        <Text style={styles.profileName}>Your Recco</Text>
+        <Text style={styles.profileHandle}>A private media archive</Text>
       </View>
       <View style={styles.tasteCard}>
-        <Text style={styles.mediaKind}>YOUR TASTE, IN ONE LINE</Text>
-        <Text style={styles.tasteTitle}>Tender hearts.{`\n`}Big ideas.</Text>
+        <Text style={styles.mediaKind}>YOUR COLLECTION</Text>
+        <Text style={styles.tasteTitle}>Every story,{`\n`}in one place.</Text>
         <View style={styles.tagRow}>
-          {["Sci-fi", "Literary", "Dream pop"].map((tag) => (
+          {["Films", "Series", "Private"].map((tag) => (
             <View key={tag} style={styles.tag}>
               <Text style={styles.tagText}>{tag}</Text>
             </View>
@@ -529,9 +538,9 @@ function ReccoApp() {
       </View>
       <Section title="This year">
         <View style={styles.yearRow}>
-          <Stat value="148" label="TRACKED" />
-          <Stat value="26" label="LISTS" />
-          <Stat value="48" label="FRIENDS" />
+          <Stat value={String(tracked.length)} label="TRACKING" />
+          <Stat value={String(saved.length)} label="SAVED" />
+          <Stat value={String(Object.values(episodeProgress).filter(Boolean).length)} label="EPISODES" />
         </View>
       </Section>
     </ScrollView>
@@ -579,8 +588,8 @@ function ReccoApp() {
             }
           />
         )}
-        {curating && (
-          <SwipeDeck onClose={() => setCurating(false)} onSave={save} />
+        {curating && trending.length > 0 && (
+          <SwipeDeck items={trending} onClose={() => setCurating(false)} onSave={save} />
         )}
         {onboarding && <Onboarding onDone={() => setOnboarding(false)} />}
       </SafeAreaView>
@@ -656,16 +665,18 @@ function Stat({ value, label }: { value: string; label: string }) {
   );
 }
 function SwipeDeck({
+  items,
   onClose,
   onSave,
 }: {
+  items: Media[];
   onClose: () => void;
   onSave: (id: string) => void;
 }) {
   const [index, setIndex] = useState(0);
   const card = useRef(new Animated.ValueXY()).current;
-  const item = picks[index % picks.length];
-  const next = picks[(index + 1) % picks.length];
+  const item = items[index % items.length];
+  const next = items[(index + 1) % items.length];
   const advance = (save: boolean) =>
     Animated.timing(card, {
       toValue: { x: save ? 500 : -500, y: 25 },
@@ -720,8 +731,8 @@ function SwipeDeck({
         <View>
           <Text style={styles.heroEyebrow}>TASTE CURATION</Text>
           <Text style={styles.swipeCount}>
-            {String((index % picks.length) + 1).padStart(2, "0")} /{" "}
-            {String(picks.length).padStart(2, "0")}
+            {String((index % items.length) + 1).padStart(2, "0")} /{" "}
+            {String(items.length).padStart(2, "0")}
           </Text>
         </View>
       </View>
@@ -947,11 +958,15 @@ function Onboarding({ onDone }: { onDone: () => void }) {
     <View style={styles.onboard}>
       <Text style={styles.brand}>Recco</Text>
       <View style={styles.onboardArt}>
-        <Image source={{ uri: picks[0].image }} style={styles.onboardImage} />
         <LinearGradient
-          colors={["transparent", "rgba(8,13,12,.95)"]}
-          style={styles.posterShade}
+          colors={["#1F5C53", "#16302C", "#0E1513"]}
+          style={StyleSheet.absoluteFill}
         />
+        <View style={styles.onboardOrbOne} />
+        <View style={styles.onboardOrbTwo} />
+        <View style={styles.onboardMark}>
+          <Ionicons name="sparkles" size={34} color={C.ink} />
+        </View>
         <Text style={styles.onboardArtText}>Your media,{`\n`}remembered.</Text>
       </View>
       <View style={styles.onboardCopy}>
@@ -1156,6 +1171,21 @@ const styles = StyleSheet.create({
   },
   progressFill: { height: 3, borderRadius: 2, backgroundColor: C.teal },
   wall: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  homeCta: {
+    marginTop: 6,
+    marginBottom: 24,
+    minHeight: 100,
+    borderRadius: 19,
+    padding: 17,
+    backgroundColor: C.surface2,
+    borderWidth: 1,
+    borderColor: C.line,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+  },
+  homeCtaTitle: { color: C.ivory, fontSize: 16, fontWeight: "800", marginTop: 7 },
+  homeCtaText: { color: C.muted, fontSize: 11, lineHeight: 16, marginTop: 4 },
   activity: {
     flexDirection: "row",
     alignItems: "center",
@@ -1208,6 +1238,16 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { color: C.ivory, fontSize: 16, fontWeight: "800", marginTop: 12 },
   emptyText: { color: C.muted, fontSize: 11, lineHeight: 16, textAlign: "center", marginTop: 7 },
+  emptyShelf: {
+    minHeight: 170,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: C.line,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 28,
+  },
   wideCard: {
     height: 126,
     borderRadius: 19,
@@ -1507,7 +1547,9 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     marginTop: Platform.OS === "web" ? 17 : 28,
   },
-  onboardImage: { width: "100%", height: "100%" },
+  onboardOrbOne: { position: "absolute", width: 180, height: 180, borderRadius: 90, backgroundColor: "rgba(68,221,193,.22)", right: -36, top: -40 },
+  onboardOrbTwo: { position: "absolute", width: 150, height: 150, borderRadius: 75, borderWidth: 1, borderColor: "rgba(232,230,222,.3)", left: -35, bottom: -62 },
+  onboardMark: { position: "absolute", width: 74, height: 74, borderRadius: 37, backgroundColor: C.teal, alignItems: "center", justifyContent: "center", right: 23, bottom: 22 },
   onboardArtText: {
     position: "absolute",
     left: 18,
