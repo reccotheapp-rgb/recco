@@ -24,7 +24,7 @@ import {
   upcomingItems,
 } from "./src/data/media";
 import type { MediaItem as Media, MediaKind as Kind } from "./src/types/media";
-import { getTrendingMedia, searchMedia } from "./src/services/media";
+import { getTitleDetails, getTrendingMedia, searchMedia } from "./src/services/media";
 import { ensureGuestSession, syncMediaState } from "./src/services/supabase";
 
 type Tab = "Home" | "Discover" | "Search" | "Library" | "Profile";
@@ -82,6 +82,7 @@ export default function App() {
     severance: 5,
   });
   const [completed, setCompleted] = useState<string[]>([]);
+  const [episodeProgress, setEpisodeProgress] = useState<Record<string, boolean>>({});
   const [hydrated, setHydrated] = useState(false);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"ALL" | Kind>("ALL");
@@ -150,11 +151,13 @@ export default function App() {
           tracked?: string[];
           rating?: Record<string, number>;
           completed?: string[];
+          episodeProgress?: Record<string, boolean>;
         };
         setSaved(data.saved ?? []);
         setTracked(data.tracked ?? []);
         setRating(data.rating ?? {});
         setCompleted(data.completed ?? []);
+        setEpisodeProgress(data.episodeProgress ?? {});
       })
       .catch(() => undefined)
       .finally(() => setHydrated(true));
@@ -163,9 +166,9 @@ export default function App() {
     if (!hydrated) return;
     void AsyncStorage.setItem(
       "recco-library-v1",
-      JSON.stringify({ saved, tracked, rating, completed }),
+      JSON.stringify({ saved, tracked, rating, completed, episodeProgress }),
     );
-  }, [saved, tracked, rating, completed, hydrated]);
+  }, [saved, tracked, rating, completed, episodeProgress, hydrated]);
   useEffect(() => {
     if (query.trim().length < 2) {
       setRemoteResults([]);
@@ -359,7 +362,7 @@ export default function App() {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.chips}
       >
-        {(["ALL", "FILM", "SHOW", "BOOK", "ALBUM"] as const).map((item) => (
+        {(["ALL", "FILM", "SHOW"] as const).map((item) => (
           <Tap
             key={item}
             onPress={() => setFilter(item)}
@@ -384,6 +387,15 @@ export default function App() {
             <Poster item={item} key={item.id} wide />
           ))}
         </View>
+        {!results.length && (
+          <View style={styles.emptyState}>
+            <Ionicons name="sparkles-outline" size={28} color={C.teal} />
+            <Text style={styles.emptyTitle}>Refreshing your picks</Text>
+            <Text style={styles.emptyText}>
+              Live film and series recommendations will appear here in a moment.
+            </Text>
+          </View>
+        )}
       </Section>
     </ScrollView>
   );
@@ -544,11 +556,15 @@ export default function App() {
             saved={saved.includes(selected.id)}
             tracked={tracked.includes(selected.id)}
             rating={rating[selected.id] ?? 0}
+            episodeProgress={episodeProgress}
             onClose={() => setSelected(null)}
             onSave={() => save(selected.id)}
             onTrack={() => track(selected.id)}
             onRate={(value) =>
               setRating((values) => ({ ...values, [selected.id]: value }))
+            }
+            onEpisodeToggle={(id) =>
+              setEpisodeProgress((values) => ({ ...values, [id]: !values[id] }))
             }
           />
         )}
@@ -756,21 +772,41 @@ function Detail({
   saved,
   tracked,
   rating,
+  episodeProgress,
   onClose,
   onSave,
   onTrack,
   onRate,
+  onEpisodeToggle,
 }: {
   item: Media;
   saved: boolean;
   tracked: boolean;
   rating: number;
+  episodeProgress: Record<string, boolean>;
   onClose: () => void;
   onSave: () => void;
   onTrack: () => void;
   onRate: (value: number) => void;
+  onEpisodeToggle: (id: string) => void;
 }) {
-  const episodes = showEpisodes[item.id] ?? [];
+  const [details, setDetails] = useState<Awaited<ReturnType<typeof getTitleDetails>>>(null);
+  const [season, setSeason] = useState<number | undefined>();
+  const [loadingDetails, setLoadingDetails] = useState(item.id.startsWith("tmdb-tv-"));
+  useEffect(() => {
+    let active = true;
+    setLoadingDetails(item.id.startsWith("tmdb-"));
+    getTitleDetails(item, season)
+      .then((value) => active && setDetails(value))
+      .catch(() => active && setDetails(null))
+      .finally(() => active && setLoadingDetails(false));
+    return () => {
+      active = false;
+    };
+  }, [item.id, season]);
+  const episodes = details?.episodes ?? showEpisodes[item.id] ?? [];
+  const watchedEpisodes = episodes.filter((episode) => episodeProgress[episode.id]).length;
+  const description = details?.overview || item.note || "Save it now and pick it up when the moment is right.";
   return (
     <View style={styles.overlay}>
       <View style={styles.sheet}>
@@ -787,33 +823,64 @@ function Detail({
               <Text style={styles.detailMeta}>
                 {item.by} · {item.year}
               </Text>
-              <Text style={styles.detailBody}>
-                {item.note || "Keep this close and pick up where you left off."}
-              </Text>
+              <Text style={styles.detailBody}>{description}</Text>
             </View>
           </View>
+          {details?.genres?.length ? (
+            <View style={styles.genreRow}>
+              {details.genres.map((genre) => (
+                <View key={genre} style={styles.genrePill}>
+                  <Text style={styles.genreText}>{genre}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+          {item.kind === "SHOW" && details?.seasons?.length ? (
+            <View style={styles.seasonBlock}>
+              <View style={styles.episodeHeading}>
+                <Text style={styles.detailLabel}>EPISODE PROGRESS</Text>
+                <Text style={styles.episodeCount}>
+                  {watchedEpisodes}/{episodes.length} WATCHED
+                </Text>
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.seasonChips}>
+                {details.seasons.map((entry) => (
+                  <Tap
+                    key={entry.number}
+                    onPress={() => setSeason(entry.number)}
+                    style={[styles.seasonChip, (season ?? details.selectedSeason) === entry.number && styles.seasonChipActive]}
+                  >
+                    <Text style={[styles.seasonChipText, (season ?? details.selectedSeason) === entry.number && styles.seasonChipTextActive]}>
+                      S{entry.number}
+                    </Text>
+                  </Tap>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
           {episodes.length > 0 && (
             <>
-              <Text style={styles.detailLabel}>SEASON 2</Text>
+              {!details?.seasons?.length && <Text style={styles.detailLabel}>EPISODES</Text>}
               {episodes.map((episode) => (
-                <View key={episode.id} style={styles.episode}>
+                <Tap key={episode.id} onPress={() => onEpisodeToggle(episode.id)} style={styles.episode}>
                   <Text style={styles.episodeNum}>{episode.number}</Text>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.episodeTitle}>{episode.title}</Text>
-                    <Text style={styles.episodeMeta}>{episode.runtime}</Text>
+                    <Text style={styles.episodeMeta}>
+                      {typeof episode.runtime === "number" ? `${episode.runtime} min` : episode.runtime}
+                    </Text>
                   </View>
                   <Ionicons
-                    name={
-                      episode.released
-                        ? "checkmark-circle-outline"
-                        : "notifications-outline"
-                    }
+                    name={episodeProgress[episode.id] ? "checkmark-circle" : "ellipse-outline"}
                     size={20}
-                    color={C.gold}
+                    color={episodeProgress[episode.id] ? C.teal : C.muted}
                   />
-                </View>
+                </Tap>
               ))}
             </>
+          )}
+          {loadingDetails && item.kind === "SHOW" && (
+            <Text style={styles.loadingText}>LOADING EPISODES…</Text>
           )}
           <Text style={styles.detailLabel}>YOUR RATING</Text>
           <View style={styles.stars}>
@@ -1108,6 +1175,18 @@ const styles = StyleSheet.create({
   chipText: { color: C.muted, fontSize: 10, fontWeight: "800" },
   chipTextActive: { color: C.ink },
   discoverGrid: { gap: 12 },
+  emptyState: {
+    minHeight: 190,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: C.line,
+    backgroundColor: C.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 32,
+  },
+  emptyTitle: { color: C.ivory, fontSize: 16, fontWeight: "800", marginTop: 12 },
+  emptyText: { color: C.muted, fontSize: 11, lineHeight: 16, textAlign: "center", marginTop: 7 },
   wideCard: {
     height: 126,
     borderRadius: 19,
@@ -1326,6 +1405,18 @@ const styles = StyleSheet.create({
   },
   detailMeta: { color: C.muted, fontSize: 11, marginTop: 4 },
   detailBody: { color: "#BEC7C2", fontSize: 11, lineHeight: 16, marginTop: 10 },
+  genreRow: { flexDirection: "row", gap: 7, flexWrap: "wrap", marginTop: 16 },
+  genrePill: { backgroundColor: C.surface2, borderRadius: 12, paddingHorizontal: 9, paddingVertical: 6 },
+  genreText: { color: C.muted, fontSize: 9, fontWeight: "800" },
+  seasonBlock: { marginTop: 3 },
+  episodeHeading: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  episodeCount: { color: C.teal, fontSize: 9, fontWeight: "900", letterSpacing: 0.7, marginTop: 14 },
+  seasonChips: { gap: 7, paddingBottom: 4 },
+  seasonChip: { borderWidth: 1, borderColor: C.line, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
+  seasonChipActive: { backgroundColor: C.teal, borderColor: C.teal },
+  seasonChipText: { color: C.muted, fontSize: 10, fontWeight: "900" },
+  seasonChipTextActive: { color: C.ink },
+  loadingText: { color: C.muted, fontSize: 9, fontWeight: "900", letterSpacing: 1, marginTop: 18 },
   detailLabel: {
     color: C.muted,
     fontSize: 9,
