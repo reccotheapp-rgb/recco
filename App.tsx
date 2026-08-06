@@ -26,7 +26,7 @@ import {
 } from "./src/data/media";
 import type { MediaItem as Media, MediaKind as Kind } from "./src/types/media";
 import { getTitleDetails, getTrendingMedia, searchMedia } from "./src/services/media";
-import { ensureGuestSession, syncMediaState } from "./src/services/supabase";
+import { ensureGuestSession, loadMediaStates, syncMediaState, syncSwipeAction } from "./src/services/supabase";
 
 type Tab = "Home" | "Discover" | "Search" | "Library" | "Profile";
 const allMedia = [...picks, ...continueItems, ...upcomingItems];
@@ -120,7 +120,7 @@ function ReccoApp() {
     );
     const item = findItem(id);
     if (item) setLibraryItems((items) => ({ ...items, [item.id]: item }));
-    if (item) void syncMediaState(item, "SAVED").catch(() => undefined);
+    if (item) void syncMediaState(item, "SAVED", { rating: rating[id] }).catch(() => undefined);
   };
   const track = (id: string) => {
     buzz();
@@ -130,7 +130,7 @@ function ReccoApp() {
     const item = findItem(id);
     if (item) setLibraryItems((items) => ({ ...items, [item.id]: item }));
     if (item)
-      void syncMediaState(item, "IN_PROGRESS", rating[id]).catch(
+      void syncMediaState(item, "IN_PROGRESS", { rating: rating[id] }).catch(
         () => undefined,
       );
   };
@@ -151,7 +151,25 @@ function ReccoApp() {
     [filter, query, liveCatalog],
   );
   useEffect(() => {
-    void ensureGuestSession().catch(() => undefined);
+    void ensureGuestSession()
+      .then(() => loadMediaStates())
+      .then((states) => {
+        if (!states.length) return;
+        setLibraryItems(Object.fromEntries(states.map((state) => [state.media_id, {
+          id: state.media_id,
+          kind: state.media_kind,
+          title: state.title,
+          by: state.media_kind === "SHOW" ? "TV series" : "Film",
+          year: "",
+          image: state.image_url ?? "",
+          note: "",
+        }])));
+        setSaved(states.filter((state) => state.status === "SAVED").map((state) => state.media_id));
+        setTracked(states.filter((state) => state.status === "IN_PROGRESS").map((state) => state.media_id));
+        setRating(Object.fromEntries(states.filter((state) => state.rating).map((state) => [state.media_id, state.rating ?? 0])));
+        setEpisodeProgress(Object.assign({}, ...states.map((state) => state.progress ?? {})));
+      })
+      .catch(() => undefined);
     void getTrendingMedia()
       .then(setTrending)
       .catch(() => undefined);
@@ -580,16 +598,29 @@ function ReccoApp() {
             onClose={() => setSelected(null)}
             onSave={() => save(selected.id)}
             onTrack={() => track(selected.id)}
-            onRate={(value) =>
-              setRating((values) => ({ ...values, [selected.id]: value }))
-            }
+            onRate={(value) => {
+              setRating((values) => ({ ...values, [selected.id]: value }));
+              void syncMediaState(selected, tracked.includes(selected.id) ? "IN_PROGRESS" : "SAVED", { rating: value, progress: episodeProgress }).catch(() => undefined);
+            }}
             onEpisodeToggle={(id) =>
-              setEpisodeProgress((values) => ({ ...values, [id]: !values[id] }))
+              setEpisodeProgress((values) => {
+                const progress = { ...values, [id]: !values[id] };
+                void syncMediaState(selected, "IN_PROGRESS", { rating: rating[selected.id], progress }).catch(() => undefined);
+                return progress;
+              })
             }
           />
         )}
         {curating && trending.length > 0 && (
-          <SwipeDeck items={trending} onClose={() => setCurating(false)} onSave={save} />
+          <SwipeDeck
+            items={trending}
+            onClose={() => setCurating(false)}
+            onSave={(id) => {
+              save(id);
+              void syncSwipeAction(id, "KEEP").catch(() => undefined);
+            }}
+            onPass={(id) => void syncSwipeAction(id, "PASS").catch(() => undefined)}
+          />
         )}
         {onboarding && <Onboarding onDone={() => setOnboarding(false)} />}
       </SafeAreaView>
@@ -668,10 +699,12 @@ function SwipeDeck({
   items,
   onClose,
   onSave,
+  onPass,
 }: {
   items: Media[];
   onClose: () => void;
   onSave: (id: string) => void;
+  onPass: (id: string) => void;
 }) {
   const [index, setIndex] = useState(0);
   const card = useRef(new Animated.ValueXY()).current;
@@ -684,6 +717,7 @@ function SwipeDeck({
       useNativeDriver: true,
     }).start(() => {
       if (save) onSave(item.id);
+      else onPass(item.id);
       card.setValue({ x: 0, y: 0 });
       setIndex((value) => value + 1);
     });

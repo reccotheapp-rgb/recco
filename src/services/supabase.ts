@@ -24,14 +24,31 @@ export async function ensureGuestSession() {
   return data.user;
 }
 
+export type MediaStatus = "SAVED" | "IN_PROGRESS" | "COMPLETED" | "PAUSED" | "DROPPED";
+
+type MediaSyncOptions = {
+  rating?: number;
+  progress?: Record<string, boolean>;
+};
+
+export type StoredMediaState = {
+  media_id: string;
+  media_kind: MediaItem["kind"];
+  title: string;
+  image_url: string | null;
+  status: MediaStatus;
+  rating: number | null;
+  progress: Record<string, boolean>;
+};
+
 export async function syncMediaState(
   item: MediaItem,
-  status: "SAVED" | "IN_PROGRESS",
-  rating?: number,
+  status: MediaStatus,
+  options: MediaSyncOptions = {},
 ) {
   const user = await ensureGuestSession();
   if (!supabase || !user) return;
-  await supabase
+  const { error } = await supabase
     .from("media_states")
     .upsert({
       user_id: user.id,
@@ -40,7 +57,32 @@ export async function syncMediaState(
       title: item.title,
       image_url: item.image,
       status,
-      rating,
+      rating: options.rating,
+      progress: options.progress ?? {},
       updated_at: new Date().toISOString(),
     });
+  if (error) throw error;
+}
+
+export async function loadMediaStates(): Promise<StoredMediaState[]> {
+  const user = await ensureGuestSession();
+  if (!supabase || !user) return [];
+  const { data, error } = await supabase
+    .from("media_states")
+    .select("media_id, media_kind, title, image_url, status, rating, progress")
+    .order("updated_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as StoredMediaState[];
+}
+
+export async function syncSwipeAction(mediaId: string, action: "KEEP" | "PASS") {
+  const user = await ensureGuestSession();
+  if (!supabase || !user) return;
+  const { error } = await supabase.from("swipe_actions").upsert({
+    user_id: user.id,
+    media_id: mediaId,
+    action,
+    created_at: new Date().toISOString(),
+  });
+  if (error) throw error;
 }
