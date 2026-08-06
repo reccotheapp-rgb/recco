@@ -525,12 +525,6 @@ export default function App() {
     <View style={styles.canvas}>
       <SafeAreaView style={styles.app}>
         <StatusBar style="light" />
-        {Platform.OS === "web" && (
-          <>
-            <View style={styles.island} />
-            <View style={styles.homeBar} />
-          </>
-        )}
         <View style={styles.stage}>{page}</View>
         <Nav
           active={tab}
@@ -901,27 +895,13 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: Platform.OS === "web" ? "#C9C7C1" : C.ink,
+    backgroundColor: C.ink,
   },
   app: {
-    flex: Platform.OS === "web" ? undefined : 1,
-    flexGrow: Platform.OS === "web" ? 0 : undefined,
-    flexShrink: Platform.OS === "web" ? 0 : undefined,
-    width: Platform.OS === "web" ? 360 : "100%",
-    height: Platform.OS === "web" ? 640 : undefined,
+    flex: 1,
+    width: "100%",
     backgroundColor: C.ink,
     overflow: "hidden",
-    ...(Platform.OS === "web"
-      ? {
-          borderColor: "#090C0B",
-          borderWidth: 8,
-          borderRadius: 36,
-          shadowColor: "#000",
-          shadowOpacity: 0.35,
-          shadowRadius: 38,
-          shadowOffset: { width: 0, height: 18 },
-        }
-      : {}),
   },
   island: {
     position: "absolute",
