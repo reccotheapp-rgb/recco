@@ -4,6 +4,7 @@ import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   Animated,
   Image,
@@ -74,6 +75,15 @@ function Tap({
 }
 
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <ReccoApp />
+    </SafeAreaProvider>
+  );
+}
+
+function ReccoApp() {
+  const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>("Home");
   const [selected, setSelected] = useState<Media | null>(null);
   const [saved, setSaved] = useState<string[]>(["after-yang"]);
@@ -545,6 +555,7 @@ export default function App() {
         <View style={styles.stage}>{page}</View>
         <Nav
           active={tab}
+          bottomInset={insets.bottom}
           onChange={(next) => {
             buzz();
             setTab(next);
@@ -579,9 +590,11 @@ export default function App() {
 
 function Nav({
   active,
+  bottomInset,
   onChange,
 }: {
   active: Tab;
+  bottomInset: number;
   onChange: (tab: Tab) => void;
 }) {
   const items: {
@@ -596,7 +609,15 @@ function Nav({
     { id: "Profile", icon: "person-outline", label: "Profile" },
   ];
   return (
-    <View style={styles.nav}>
+    <View
+      style={[
+        styles.nav,
+        {
+          height: Platform.OS === "web" ? 62 : 58 + Math.max(bottomInset, 16),
+          paddingBottom: Platform.OS === "web" ? 3 : Math.max(bottomInset, 8),
+        },
+      ]}
+    >
       {items.map((item) => (
         <Tap
           key={item.id}
