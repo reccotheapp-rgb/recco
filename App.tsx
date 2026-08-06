@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   Animated,
+  BackHandler,
   Image,
   PanResponder,
   Platform,
@@ -26,7 +27,14 @@ import {
 } from "./src/data/media";
 import type { MediaItem as Media, MediaKind as Kind } from "./src/types/media";
 import { getTitleDetails, getTrendingMedia, searchMedia } from "./src/services/media";
-import { ensureGuestSession, loadMediaStates, syncMediaState, syncSwipeAction } from "./src/services/supabase";
+import {
+  ensureGuestSession,
+  loadEpisodeReviews,
+  loadMediaStates,
+  saveEpisodeReview,
+  syncMediaState,
+  syncSwipeAction,
+} from "./src/services/supabase";
 
 type Tab = "Home" | "Discover" | "Search" | "Library" | "Profile";
 const allMedia = [...picks, ...continueItems, ...upcomingItems];
@@ -228,6 +236,28 @@ function ReccoApp() {
       clearTimeout(timeout);
     };
   }, [query]);
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (selected) {
+        setSelected(null);
+        return true;
+      }
+      if (curating) {
+        setCurating(false);
+        return true;
+      }
+      if (onboarding) {
+        setOnboarding(false);
+        return true;
+      }
+      if (tab !== "Home") {
+        setTab("Home");
+        return true;
+      }
+      return false;
+    });
+    return () => subscription.remove();
+  }, [curating, onboarding, selected, tab]);
 
   const Header = ({ label }: { label?: string }) => (
     <View style={styles.header}>
@@ -859,6 +889,10 @@ function Detail({
   const [details, setDetails] = useState<Awaited<ReturnType<typeof getTitleDetails>>>(null);
   const [season, setSeason] = useState<number | undefined>();
   const [loadingDetails, setLoadingDetails] = useState(item.id.startsWith("tmdb-tv-"));
+  const [reviews, setReviews] = useState<Record<number, { body: string; rating: number | null }>>({});
+  const [reviewing, setReviewing] = useState<{ number: number; title: string } | null>(null);
+  const [reviewBody, setReviewBody] = useState("");
+  const [reviewRating, setReviewRating] = useState(0);
   useEffect(() => {
     let active = true;
     setLoadingDetails(item.id.startsWith("tmdb-"));
@@ -871,6 +905,19 @@ function Detail({
     };
   }, [item.id, season]);
   const episodes = details?.episodes ?? showEpisodes[item.id] ?? [];
+  const selectedSeason = season ?? details?.selectedSeason ?? 1;
+  useEffect(() => {
+    if (item.kind !== "SHOW") return;
+    let active = true;
+    loadEpisodeReviews(item.id, selectedSeason)
+      .then((entries) => {
+        if (active) setReviews(Object.fromEntries(entries.map((entry) => [entry.episode_number, { body: entry.body, rating: entry.rating }])));
+      })
+      .catch(() => active && setReviews({}));
+    return () => {
+      active = false;
+    };
+  }, [item.id, item.kind, selectedSeason]);
   const watchedEpisodes = episodes.filter((episode) => episodeProgress[episode.id]).length;
   const description = details?.overview || item.note || "Save it now and pick it up when the moment is right.";
   return (
@@ -928,22 +975,77 @@ function Detail({
             <>
               {!details?.seasons?.length && <Text style={styles.detailLabel}>EPISODES</Text>}
               {episodes.map((episode) => (
-                <Tap key={episode.id} onPress={() => onEpisodeToggle(episode.id)} style={styles.episode}>
-                  <Text style={styles.episodeNum}>{episode.number}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.episodeTitle}>{episode.title}</Text>
-                    <Text style={styles.episodeMeta}>
-                      {typeof episode.runtime === "number" ? `${episode.runtime} min` : episode.runtime}
-                    </Text>
-                  </View>
-                  <Ionicons
-                    name={episodeProgress[episode.id] ? "checkmark-circle" : "ellipse-outline"}
-                    size={20}
-                    color={episodeProgress[episode.id] ? C.teal : C.muted}
-                  />
-                </Tap>
+                <View key={episode.id} style={styles.episodeRow}>
+                  <Tap onPress={() => onEpisodeToggle(episode.id)} style={styles.episode}>
+                    <Text style={styles.episodeNum}>{episode.number}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.episodeTitle}>{episode.title}</Text>
+                      <Text style={styles.episodeMeta}>
+                        {typeof episode.runtime === "number" ? `${episode.runtime} min` : episode.runtime}
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name={episodeProgress[episode.id] ? "checkmark-circle" : "ellipse-outline"}
+                      size={20}
+                      color={episodeProgress[episode.id] ? C.teal : C.muted}
+                    />
+                  </Tap>
+                  <Tap
+                    onPress={() => {
+                      const current = reviews[episode.number];
+                      setReviewing({ number: episode.number, title: episode.title });
+                      setReviewBody(current?.body ?? "");
+                      setReviewRating(current?.rating ?? 0);
+                    }}
+                    style={styles.episodeNote}
+                  >
+                    <Ionicons name={reviews[episode.number]?.body ? "chatbubble" : "chatbubble-outline"} size={17} color={reviews[episode.number]?.body ? C.teal : C.muted} />
+                  </Tap>
+                </View>
               ))}
             </>
+          )}
+          {reviewing && (
+            <View style={styles.reviewEditor}>
+              <View style={styles.reviewHeading}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.mediaKind}>EPISODE {reviewing.number} NOTE</Text>
+                  <Text style={styles.reviewTitle}>{reviewing.title}</Text>
+                </View>
+                <Tap onPress={() => setReviewing(null)} style={styles.reviewClose}>
+                  <Ionicons name="close" size={16} color={C.ivory} />
+                </Tap>
+              </View>
+              <TextInput
+                value={reviewBody}
+                onChangeText={setReviewBody}
+                placeholder="What did you think?"
+                placeholderTextColor={C.muted}
+                multiline
+                maxLength={2000}
+                style={styles.reviewInput}
+              />
+              <View style={styles.reviewFooter}>
+                <View style={styles.reviewStars}>
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <Tap key={star} onPress={() => setReviewRating(star)}>
+                      <Ionicons name={star <= reviewRating ? "star" : "star-outline"} size={18} color={C.teal} />
+                    </Tap>
+                  ))}
+                </View>
+                <Tap
+                  onPress={() => {
+                    const review = { media_id: item.id, season_number: selectedSeason, episode_number: reviewing.number, body: reviewBody.trim(), rating: reviewRating || null };
+                    setReviews((current) => ({ ...current, [reviewing.number]: { body: review.body, rating: review.rating } }));
+                    void saveEpisodeReview(review).catch(() => undefined);
+                    setReviewing(null);
+                  }}
+                  style={styles.reviewSave}
+                >
+                  <Text style={styles.primaryText}>Save note</Text>
+                </Tap>
+              </View>
+            </View>
           )}
           {loadingDetails && item.kind === "SHOW" && (
             <Text style={styles.loadingText}>LOADING EPISODES…</Text>
@@ -1521,6 +1623,7 @@ const styles = StyleSheet.create({
     marginBottom: 9,
   },
   episode: {
+    flex: 1,
     flexDirection: "row",
     gap: 10,
     alignItems: "center",
@@ -1528,6 +1631,15 @@ const styles = StyleSheet.create({
     marginBottom: 7,
     backgroundColor: C.surface,
     borderRadius: 13,
+  },
+  episodeRow: { flexDirection: "row", alignItems: "stretch", gap: 7 },
+  episodeNote: {
+    width: 43,
+    marginBottom: 7,
+    borderRadius: 13,
+    backgroundColor: C.surface,
+    alignItems: "center",
+    justifyContent: "center",
   },
   episodeNum: {
     color: C.ink,
@@ -1542,6 +1654,14 @@ const styles = StyleSheet.create({
   },
   episodeTitle: { color: C.ivory, fontSize: 12, fontWeight: "700" },
   episodeMeta: { color: C.muted, fontSize: 10, marginTop: 3 },
+  reviewEditor: { marginTop: 8, padding: 13, borderRadius: 15, backgroundColor: C.surface2, borderWidth: 1, borderColor: C.line },
+  reviewHeading: { flexDirection: "row", alignItems: "center", gap: 12 },
+  reviewTitle: { color: C.ivory, fontSize: 13, fontWeight: "800", marginTop: 3 },
+  reviewClose: { width: 30, height: 30, borderRadius: 15, backgroundColor: C.surface, alignItems: "center", justifyContent: "center" },
+  reviewInput: { minHeight: 74, color: C.ivory, fontSize: 12, lineHeight: 17, textAlignVertical: "top", marginTop: 12, padding: 10, borderRadius: 10, backgroundColor: C.ink },
+  reviewFooter: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 11 },
+  reviewStars: { flexDirection: "row", gap: 5 },
+  reviewSave: { backgroundColor: C.teal, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9 },
   stars: { flexDirection: "row", gap: 12 },
   detailActions: { flexDirection: "row", gap: 9, marginTop: 21 },
   secondaryBtn: {

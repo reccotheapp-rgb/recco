@@ -41,6 +41,14 @@ export type StoredMediaState = {
   progress: Record<string, boolean>;
 };
 
+export type EpisodeReview = {
+  media_id: string;
+  season_number: number;
+  episode_number: number;
+  body: string;
+  rating: number | null;
+};
+
 export async function syncMediaState(
   item: MediaItem,
   status: MediaStatus,
@@ -83,6 +91,32 @@ export async function syncSwipeAction(mediaId: string, action: "KEEP" | "PASS") 
     media_id: mediaId,
     action,
     created_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+}
+
+export async function loadEpisodeReviews(
+  mediaId: string,
+  seasonNumber: number,
+): Promise<EpisodeReview[]> {
+  const user = await ensureGuestSession();
+  if (!supabase || !user) return [];
+  const { data, error } = await supabase
+    .from("episode_reviews")
+    .select("media_id, season_number, episode_number, body, rating")
+    .eq("media_id", mediaId)
+    .eq("season_number", seasonNumber);
+  if (error) throw error;
+  return (data ?? []) as EpisodeReview[];
+}
+
+export async function saveEpisodeReview(review: EpisodeReview) {
+  const user = await ensureGuestSession();
+  if (!supabase || !user) return;
+  const { error } = await supabase.from("episode_reviews").upsert({
+    ...review,
+    user_id: user.id,
+    updated_at: new Date().toISOString(),
   });
   if (error) throw error;
 }
