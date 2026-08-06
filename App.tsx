@@ -24,7 +24,7 @@ import {
   upcomingItems,
 } from "./src/data/media";
 import type { MediaItem as Media, MediaKind as Kind } from "./src/types/media";
-import { searchMedia } from "./src/services/media";
+import { getTrendingMedia, searchMedia } from "./src/services/media";
 import { ensureGuestSession, syncMediaState } from "./src/services/supabase";
 
 type Tab = "Home" | "Discover" | "Search" | "Library" | "Profile";
@@ -86,6 +86,7 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"ALL" | Kind>("ALL");
   const [remoteResults, setRemoteResults] = useState<Media[]>([]);
+  const [trending, setTrending] = useState<Media[]>([]);
   const [searching, setSearching] = useState(false);
   const [onboarding, setOnboarding] = useState(true);
   const [curating, setCurating] = useState(false);
@@ -135,6 +136,9 @@ export default function App() {
   );
   useEffect(() => {
     void ensureGuestSession().catch(() => undefined);
+    void getTrendingMedia()
+      .then(setTrending)
+      .catch(() => undefined);
   }, []);
   useEffect(() => {
     AsyncStorage.getItem("recco-library-v1")
@@ -246,14 +250,15 @@ export default function App() {
     </View>
   );
 
+  const heroItem = trending[0] ?? picks[0];
   const Home = () => (
     <ScrollView
       showsVerticalScrollIndicator={false}
       contentContainerStyle={styles.scroll}
     >
       <Header />
-      <Tap onPress={() => open(picks[0])} style={styles.hero}>
-        <Image source={{ uri: picks[0].image }} style={styles.heroImage} />
+      <Tap onPress={() => open(heroItem)} style={styles.hero}>
+        <Image source={{ uri: heroItem.image }} style={styles.heroImage} />
         <LinearGradient
           colors={["rgba(8,13,12,.12)", "rgba(8,13,12,.96)"]}
           style={styles.heroShade}
@@ -266,10 +271,9 @@ export default function App() {
           </View>
         </View>
         <View style={styles.heroBottom}>
-          <Text style={styles.heroTitle}>Your next{`\n`}obsession.</Text>
+          <Text style={styles.heroTitle}>{heroItem.title}</Text>
           <Text style={styles.heroBody}>
-            A quietly beautiful story about memory, family and what makes us
-            human.
+            {heroItem.note || "Trending now on TMDB."}
           </Text>
           <View style={styles.heroButton}>
             <Text style={styles.heroButtonText}>Explore the Recco</Text>
@@ -888,7 +892,7 @@ const C = {
   surface2: "#202927",
   ivory: "#E8E6DE",
   muted: "#8E9C96",
-  gold: "#E9C349",
+  gold: "#44DDC1",
   teal: "#44DDC1",
   line: "#30403A",
 };
