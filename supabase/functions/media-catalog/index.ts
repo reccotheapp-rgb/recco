@@ -7,6 +7,7 @@ const corsHeaders = {
 };
 
 type TmdbItem = Record<string, unknown>;
+type GoogleBooksResponse = { items?: TmdbItem[] };
 
 function mediaItem(item: TmdbItem) {
   const mediaType = item.media_type === "tv" ? "tv" : "movie";
@@ -20,6 +21,46 @@ function mediaItem(item: TmdbItem) {
     note: String(item.overview ?? ""),
     score: Number(item.vote_average ?? 0),
   };
+}
+
+function plainText(value: unknown) {
+  return String(value ?? "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function bookItem(volume: TmdbItem) {
+  const info = (volume.volumeInfo ?? {}) as TmdbItem;
+  const images = (info.imageLinks ?? {}) as TmdbItem;
+  const authors = Array.isArray(info.authors) ? info.authors.map(String).filter(Boolean) : [];
+  const categories = Array.isArray(info.categories) ? info.categories.map(String).filter(Boolean) : [];
+  const thumbnail = String(images.thumbnail ?? images.smallThumbnail ?? "").replace(/^http:/, "https:");
+  return {
+    id: `google-book-${volume.id}`,
+    kind: "BOOK",
+    title: String(info.title ?? "Untitled book"),
+    by: authors.join(", ") || "Unknown author",
+    year: String(info.publishedDate ?? "").slice(0, 4) || "â€”",
+    image: thumbnail,
+    note: plainText(info.description),
+    score: Number(info.averageRating ?? 0),
+    categories,
+  };
+}
+
+async function searchBooks(query: string, maxResults = 8) {
+  const key = Deno.env.get("GOOGLE_BOOKS_API_KEY");
+  if (!key) return [];
+  const endpoint = new URL("https://www.googleapis.com/books/v1/volumes");
+  endpoint.searchParams.set("q", query);
+  endpoint.searchParams.set("printType", "books");
+  endpoint.searchParams.set("maxResults", String(Math.min(40, Math.max(1, maxResults))));
+  endpoint.searchParams.set("key", key);
+  const response = await fetch(endpoint);
+  if (!response.ok) return [];
+  const data = (await response.json()) as GoogleBooksResponse;
+  return (data.items ?? []).map(bookItem);
 }
 
 async function requireUser(request: Request) {
@@ -56,10 +97,24 @@ Deno.serve(async (request) => {
   if (action === "search") {
     const query = url.searchParams.get("q")?.trim();
     if (!query) return Response.json({ error: "A search query is required" }, { status: 400, headers: corsHeaders });
-    const upstream = await fetch(`${TMDB}/search/multi?query=${encodeURIComponent(query)}&include_adult=false&language=en-US`, { headers });
-    if (!upstream.ok) return Response.json({ error: "TMDB search is unavailable" }, { status: 502, headers: corsHeaders });
-    const data = (await upstream.json()) as { results?: TmdbItem[] };
-    return Response.json({ results: (data.results ?? []).filter((item) => item.media_type === "movie" || item.media_type === "tv").slice(0, 20).map(mediaItem) }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
+    const [upstream, books] = await Promise.all([
+      fetch(`${TMDB}/search/multi?query=${encodeURIComponent(query)}&include_adult=false&language=en-US`, { headers }),
+      searchBooks(query),
+    ]);
+    const data = upstream.ok ? (await upstream.json()) as { results?: TmdbItem[] } : { results: [] };
+    const screenResults = (data.results ?? [])
+      .filter((item) => item.media_type === "movie" || item.media_type === "tv")
+      .slice(0, 12)
+      .map(mediaItem);
+    if (!upstream.ok && !books.length) return Response.json({ error: "Media search is unavailable" }, { status: 502, headers: corsHeaders });
+    return Response.json({ results: [...screenResults, ...books] }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
+  }
+
+  if (action === "books") {
+    const query = url.searchParams.get("q")?.trim() || "subject:fiction";
+    const books = await searchBooks(query, 20);
+    if (!books.length) return Response.json({ error: "Books are unavailable" }, { status: 502, headers: corsHeaders });
+    return Response.json({ results: books }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
   }
 
   const type = url.searchParams.get("type") === "tv" ? "tv" : "movie";
