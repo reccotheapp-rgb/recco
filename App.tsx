@@ -147,7 +147,7 @@ function ReccoApp() {
         () => undefined,
       );
   };
-  const liveCatalog = trending;
+  const liveCatalog = [...trending, ...books];
   const shelfItems = Object.values(libraryItems).filter(
     (item) => saved.includes(item.id) || tracked.includes(item.id),
   );
@@ -425,6 +425,27 @@ function ReccoApp() {
           )}
         </View>
       </Section>
+      {books.length > 0 && (
+        <Section title="Books for you">
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.rail}
+          >
+            {books.slice(0, 6).map((item) => (
+              <View key={item.id}>
+                <Poster item={item} />
+                <Text numberOfLines={1} style={styles.railTitle}>
+                  {item.title}
+                </Text>
+                <Text numberOfLines={1} style={styles.railMeta}>
+                  {item.by}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+        </Section>
+      )}
       <Section title="From your circle">
         <Tap onPress={() => setTab("Profile")} style={styles.activity}>
           <View style={styles.avatar}>
