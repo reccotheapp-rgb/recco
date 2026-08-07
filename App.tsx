@@ -1055,6 +1055,7 @@ function Detail({
   onRate: (value: number) => void;
   onEpisodeToggle: (id: string) => void;
 }) {
+  const insets = useSafeAreaInsets();
   const [details, setDetails] = useState<Awaited<ReturnType<typeof getTitleDetails>>>(null);
   const [season, setSeason] = useState<number | undefined>();
   const [loadingDetails, setLoadingDetails] = useState(item.id.startsWith("tmdb-tv-"));
@@ -1091,12 +1092,15 @@ function Detail({
   const description = details?.overview || item.note || "Save it now and pick it up when the moment is right.";
   return (
     <View style={styles.overlay}>
-      <View style={styles.sheet}>
+      <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         <View style={styles.grab} />
         <Tap onPress={onClose} style={styles.close}>
           <Ionicons name="close" size={20} color={C.ivory} />
         </Tap>
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.detailScroll}
+        >
           <View style={styles.detailTop}>
             <Image source={{ uri: item.image }} style={styles.detailPoster} />
             <View style={{ flex: 1 }}>
@@ -1231,29 +1235,29 @@ function Detail({
               </Tap>
             ))}
           </View>
-          <View style={styles.detailActions}>
-            <Tap onPress={onSave} style={styles.secondaryBtn}>
-              <Ionicons
-                name={saved ? "bookmark" : "bookmark-outline"}
-                size={18}
-                color={C.ivory}
-              />
-              <Text style={styles.secondaryText}>
-                {saved ? "Saved" : "Save"}
-              </Text>
-            </Tap>
-            <Tap onPress={onTrack} style={styles.primaryBtn}>
-              <Text style={styles.primaryText}>
-                {tracked ? "Tracking" : "Track this"}
-              </Text>
-              <Ionicons
-                name={tracked ? "checkmark" : "add"}
-                size={17}
-                color={C.ink}
-              />
-            </Tap>
-          </View>
         </ScrollView>
+        <View style={styles.detailActions}>
+          <Tap onPress={onSave} style={styles.secondaryBtn}>
+            <Ionicons
+              name={saved ? "bookmark" : "bookmark-outline"}
+              size={18}
+              color={C.ivory}
+            />
+            <Text style={styles.secondaryText}>
+              {saved ? "Saved" : "Save"}
+            </Text>
+          </Tap>
+          <Tap onPress={onTrack} style={styles.primaryBtn}>
+            <Text style={styles.primaryText}>
+              {tracked ? "Tracking" : "Track this"}
+            </Text>
+            <Ionicons
+              name={tracked ? "checkmark" : "add"}
+              size={17}
+              color={C.ink}
+            />
+          </Tap>
+        </View>
       </View>
     </View>
   );
@@ -1745,6 +1749,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 28,
     padding: 20,
   },
+  detailScroll: { paddingBottom: 18 },
   grab: {
     width: 37,
     height: 4,
