@@ -9,6 +9,7 @@
     "expo": "~57.0.9",
     "expo-haptics": "~57.0.1",
     "expo-linear-gradient": "~57.0.1",
+    "expo-navigation-bar": "~57.0.2",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",

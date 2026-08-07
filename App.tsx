@@ -3,8 +3,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   Animated,
   BackHandler,
@@ -13,7 +13,6 @@ import {
   PanResponder,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -37,6 +36,7 @@ import {
 } from "./src/services/supabase";
 
 type Tab = "Home" | "Discover" | "Search" | "Library" | "Profile";
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const kindIcon: Record<Kind, keyof typeof Ionicons.glyphMap> = {
   FILM: "film-outline",
   SHOW: "tv-outline",
@@ -55,30 +55,28 @@ function Tap({
 }) {
   const scale = useRef(new Animated.Value(1)).current;
   return (
-    <Animated.View style={{ transform: [{ scale }] }}>
-      <Pressable
-        style={style}
-        onPress={onPress}
-        onPressIn={() =>
-          Animated.spring(scale, {
-            toValue: 0.97,
-            useNativeDriver: true,
-            speed: 36,
-            bounciness: 5,
-          }).start()
-        }
-        onPressOut={() =>
-          Animated.spring(scale, {
-            toValue: 1,
-            useNativeDriver: true,
-            speed: 22,
-            bounciness: 7,
-          }).start()
-        }
-      >
-        {children}
-      </Pressable>
-    </Animated.View>
+    <AnimatedPressable
+      style={[style, { transform: [{ scale }] }]}
+      onPress={onPress}
+      onPressIn={() =>
+        Animated.spring(scale, {
+          toValue: 0.97,
+          useNativeDriver: true,
+          speed: 36,
+          bounciness: 5,
+        }).start()
+      }
+      onPressOut={() =>
+        Animated.spring(scale, {
+          toValue: 1,
+          useNativeDriver: true,
+          speed: 22,
+          bounciness: 7,
+        }).start()
+      }
+    >
+      {children}
+    </AnimatedPressable>
   );
 }
 
@@ -111,8 +109,10 @@ function ReccoApp() {
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState(false);
   const [searching, setSearching] = useState(false);
-  const [onboarding, setOnboarding] = useState(true);
+  const [onboarding, setOnboarding] = useState(false);
   const [curating, setCurating] = useState(false);
+  const [tasteWeights, setTasteWeights] = useState<Record<string, number>>({});
+  const [libraryFilter, setLibraryFilter] = useState<"ALL" | "SAVED" | "TRACKING">("ALL");
   const buzz = () =>
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
       () => undefined,
@@ -148,10 +148,17 @@ function ReccoApp() {
       );
   };
   const liveCatalog = [...trending, ...books];
-  const shelfItems = Object.values(libraryItems).filter(
+  const allShelfItems = Object.values(libraryItems).filter(
     (item) => saved.includes(item.id) || tracked.includes(item.id),
   );
-  const trackingItems = shelfItems.filter((item) => tracked.includes(item.id));
+  const shelfItems = allShelfItems.filter((item) =>
+    libraryFilter === "SAVED"
+      ? saved.includes(item.id) && !tracked.includes(item.id)
+      : libraryFilter === "TRACKING"
+        ? tracked.includes(item.id)
+        : saved.includes(item.id) || tracked.includes(item.id),
+  );
+  const trackingItems = allShelfItems.filter((item) => tracked.includes(item.id));
   const results = useMemo(
     () =>
       liveCatalog.filter(
@@ -176,6 +183,7 @@ function ReccoApp() {
         return { states, taste };
       })
       .then(({ states, taste }) => {
+        setTasteWeights(taste);
         if (!states.length) return getBookRecommendations(bookQueryFromTaste(taste));
         setLibraryItems(Object.fromEntries(states.map((state) => [state.media_id, {
           id: state.media_id,
@@ -446,19 +454,18 @@ function ReccoApp() {
           </ScrollView>
         </Section>
       )}
-      <Section title="From your circle">
-        <Tap onPress={() => setTab("Profile")} style={styles.activity}>
+      <Section title="Your taste, in motion">
+        <Tap onPress={() => setCurating(true)} style={styles.activity}>
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>J</Text>
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.activityText}>
-              Julian finished{" "}
-              <Text style={styles.activityEm}>Blade Runner 2049</Text>
+              Teach Recco what stays with you.
             </Text>
-            <Text style={styles.activityMeta}>★★★★★ · 2h ago</Text>
+            <Text style={styles.activityMeta}>FOUR SIGNALS · FILMS, SHOWS AND BOOKS</Text>
           </View>
-          <Ionicons name="heart-outline" size={20} color={C.ivory} />
+          <Ionicons name="arrow-forward" size={20} color={C.teal} />
         </Tap>
       </Section>
     </ScrollView>
@@ -527,10 +534,11 @@ function ReccoApp() {
   const Search = () => (
     <KeyboardAvoidingView
       style={styles.searchPage}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={0}
     >
     <ScrollView
-      keyboardShouldPersistTaps="always"
+      keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
       contentContainerStyle={styles.scroll}
     >
@@ -600,6 +608,19 @@ function ReccoApp() {
           <Ionicons name="add" size={22} color={C.ink} />
         </Tap>
       </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.libraryFilters}>
+        {(["ALL", "TRACKING", "SAVED"] as const).map((entry) => (
+          <Tap
+            key={entry}
+            onPress={() => setLibraryFilter(entry)}
+            style={[styles.libraryFilter, libraryFilter === entry && styles.libraryFilterActive]}
+          >
+            <Text style={[styles.libraryFilterText, libraryFilter === entry && styles.libraryFilterTextActive]}>
+              {entry === "ALL" ? "Everything" : entry[0] + entry.slice(1).toLowerCase()}
+            </Text>
+          </Tap>
+        ))}
+      </ScrollView>
       <Section title="On your shelves">
         <View style={styles.libraryGrid}>
         {shelfItems.map((item) => (
@@ -658,10 +679,14 @@ function ReccoApp() {
         <Text style={styles.profileHandle}>A private media archive</Text>
       </View>
       <View style={styles.tasteCard}>
-        <Text style={styles.mediaKind}>YOUR COLLECTION</Text>
-        <Text style={styles.tasteTitle}>Every story,{`\n`}in one place.</Text>
+        <Text style={styles.mediaKind}>YOUR TASTE PROFILE</Text>
+        <Text style={styles.tasteTitle}>{Object.keys(tasteWeights).length ? "Built from the stories\nthat move you." : "Every story,\nin one place."}</Text>
         <View style={styles.tagRow}>
-          {["Films", "Series", "Private"].map((tag) => (
+          {(Object.entries(tasteWeights)
+            .filter(([tag, value]) => !tag.startsWith("kind:") && value > 0)
+            .sort(([, left], [, right]) => right - left)
+            .slice(0, 3)
+            .map(([tag]) => tag) || []).concat(Object.keys(tasteWeights).length ? [] : ["Films", "Series", "Books"]).slice(0, 3).map((tag) => (
             <View key={tag} style={styles.tag}>
               <Text style={styles.tagText}>{tag}</Text>
             </View>
@@ -691,7 +716,7 @@ function ReccoApp() {
     );
   return (
     <View style={styles.canvas}>
-      <SafeAreaView style={styles.app}>
+      <SafeAreaView style={styles.app} edges={["top", "bottom"]}>
         <StatusBar style="light" />
         <Animated.View
           style={[
@@ -746,6 +771,12 @@ function ReccoApp() {
                 setLibraryItems((items) => ({ ...items, [item.id]: item }));
                 void syncMediaState(item, "SAVED", { rating: rating[item.id] }).catch(() => undefined);
               }
+              const signal = action === "LOVE" ? 4 : action === "SAVE" ? 2 : action === "NOT_FOR_ME" ? -4 : -1;
+              setTasteWeights((current) => {
+                const next = { ...current, [`kind:${item.kind}`]: (current[`kind:${item.kind}`] ?? 0) + signal };
+                item.genres?.forEach((genre) => { next[genre] = (next[genre] ?? 0) + signal; });
+                return next;
+              });
               void syncSwipeAction(item, action).catch(() => undefined);
             }}
           />
@@ -781,8 +812,8 @@ function Nav({
       style={[
         styles.nav,
         {
-          height: Platform.OS === "web" ? 62 : 58 + Math.max(bottomInset, 16),
-          paddingBottom: Platform.OS === "web" ? 3 : Math.max(bottomInset, 8),
+          height: Platform.OS === "web" ? 62 : 68,
+          paddingBottom: Platform.OS === "web" ? 3 : 6,
         },
       ]}
     >
@@ -841,12 +872,12 @@ function SwipeDeck({
   const seenIds = useRef(new Set<string>());
   const nextPage = useRef(2);
   const loadingPage = useRef(false);
-  const resetAfterSwipe = useRef(false);
   const swipeInFlight = useRef(false);
   const { height: viewportHeight } = useWindowDimensions();
   const item = queue[index];
   const next = queue[index + 1];
-  const deckHeight = Platform.OS === "web" ? 390 : Math.min(500, Math.max(390, viewportHeight * 0.58));
+  const third = queue[index + 2];
+  const deckHeight = Platform.OS === "web" ? 410 : Math.min(560, Math.max(390, viewportHeight * 0.56));
   useEffect(() => {
     seenIds.current = new Set();
     nextPage.current = items.length ? 2 : 1;
@@ -883,14 +914,10 @@ function SwipeDeck({
       });
   }, [deckError, index, loadAttempt, queue.length]);
   useEffect(() => {
-    if (next?.image) Image.prefetch(next.image).catch(() => undefined);
-  }, [next?.image]);
-  useLayoutEffect(() => {
-    if (!resetAfterSwipe.current) return;
-    card.setValue({ x: 0, y: 0 });
-    resetAfterSwipe.current = false;
-    swipeInFlight.current = false;
-  }, [index, card]);
+    [next, third].forEach((entry) => {
+      if (entry?.image) void Image.prefetch(entry.image).catch(() => undefined);
+    });
+  }, [next?.image, third?.image]);
   const advance = (action: TasteAction) => {
     if (!item || swipeInFlight.current) return;
     swipeInFlight.current = true;
@@ -901,8 +928,11 @@ function SwipeDeck({
     }).start(() => {
       onSignal(item, action);
       seenIds.current.add(item.id);
-      resetAfterSwipe.current = true;
+      // The old card is already off screen. Resetting it before state changes
+      // prevents a one-frame flash of the next title in the centre.
+      card.setValue({ x: 0, y: 0 });
       setIndex((value) => value + 1);
+      swipeInFlight.current = false;
     });
   };
   const pan = useMemo(
@@ -994,6 +1024,7 @@ function SwipeDeck({
       <Text style={styles.swipeTitle}>Build your{`\n`}taste profile.</Text>
       <Text style={styles.swipeHint}>{loadingMore ? "Finding more titles…" : "Right to save · left to pass"}</Text>
       <View style={[styles.deck, { height: deckHeight }]}>
+        {third && <View style={[styles.nextDeckCard, styles.thirdDeckCard]} />}
         <View style={styles.nextDeckCard}>
           {next && (
             <>
@@ -1058,23 +1089,38 @@ function SwipeDeck({
             <Text style={styles.deckMeta}>
               {item.by} · {item.year}
             </Text>
+            {!!item.genres?.length && (
+              <Text numberOfLines={1} style={styles.deckGenres}>{item.genres.slice(0, 3).join(" · ")}</Text>
+            )}
             <Text style={styles.deckNote}>{item.note}</Text>
           </View>
         </Animated.View>
       </View>
       <View style={styles.swipeActions}>
-        <Tap onPress={() => advance("NOT_FOR_ME")} style={styles.notForMeAction}>
-          <Ionicons name="close" size={25} color="#E9917A" />
-        </Tap>
-        <Tap onPress={() => advance("PASS")} style={styles.passAction}>
-          <Ionicons name="arrow-back" size={20} color={C.ivory} />
-        </Tap>
-        <Tap onPress={() => advance("SAVE")} style={styles.keepAction}>
-          <Ionicons name="bookmark" size={20} color={C.ink} />
-        </Tap>
-        <Tap onPress={() => advance("LOVE")} style={styles.loveAction}>
-          <Ionicons name="heart" size={21} color={C.ink} />
-        </Tap>
+        <View style={styles.signalAction}>
+          <Tap onPress={() => advance("NOT_FOR_ME")} style={styles.notForMeAction}>
+            <Ionicons name="close" size={23} color="#E9917A" />
+          </Tap>
+          <Text style={styles.signalLabel}>Nope</Text>
+        </View>
+        <View style={styles.signalAction}>
+          <Tap onPress={() => advance("PASS")} style={styles.passAction}>
+            <Ionicons name="arrow-back" size={20} color={C.ivory} />
+          </Tap>
+          <Text style={styles.signalLabel}>Pass</Text>
+        </View>
+        <View style={styles.signalAction}>
+          <Tap onPress={() => advance("SAVE")} style={styles.keepAction}>
+            <Ionicons name="bookmark" size={20} color={C.ink} />
+          </Tap>
+          <Text style={styles.signalLabel}>Save</Text>
+        </View>
+        <View style={styles.signalAction}>
+          <Tap onPress={() => advance("LOVE")} style={styles.loveAction}>
+            <Ionicons name="heart" size={21} color={C.ink} />
+          </Tap>
+          <Text style={styles.signalLabel}>Love</Text>
+        </View>
       </View>
     </View>
   );
@@ -1389,9 +1435,9 @@ const styles = StyleSheet.create({
   },
   stage: { flex: 1 },
   scroll: {
-    paddingTop: Platform.OS === "web" ? 48 : 18,
+    paddingTop: Platform.OS === "web" ? 32 : 18,
     paddingHorizontal: Platform.OS === "web" ? 17 : 20,
-    paddingBottom: Platform.OS === "web" ? 84 : 105,
+    paddingBottom: 28,
   },
   header: {
     height: 38,
@@ -1682,6 +1728,17 @@ const styles = StyleSheet.create({
     gap: 21,
     marginBottom: 36,
   },
+  libraryFilters: { gap: 8, paddingBottom: 22 },
+  libraryFilter: {
+    borderWidth: 1,
+    borderColor: C.line,
+    borderRadius: 15,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+  },
+  libraryFilterActive: { borderColor: C.teal, backgroundColor: "rgba(68,221,193,.13)" },
+  libraryFilterText: { color: C.muted, fontSize: 10, fontWeight: "800" },
+  libraryFilterTextActive: { color: C.teal },
   statNum: { color: C.ivory, fontSize: 26, fontWeight: "800" },
   statLabel: {
     color: C.muted,
@@ -2056,7 +2113,9 @@ const styles = StyleSheet.create({
     inset: 0,
     borderRadius: 25,
     overflow: "hidden",
+    backgroundColor: C.surface2,
   },
+  thirdDeckCard: { transform: [{ scale: 0.95 }, { translateY: -11 }], opacity: 0.55 },
   nextDeckInfo: { position: "absolute", left: 18, right: 18, bottom: 18 },
   nextDeckTitle: { color: "#FFF", fontSize: 26, lineHeight: 28, fontWeight: "900", letterSpacing: -0.8 },
   nextDeckMeta: { color: "#D2D8D4", fontSize: 12, marginTop: 5 },
@@ -2108,15 +2167,18 @@ const styles = StyleSheet.create({
   },
   deckFacts: { flexDirection: "row", alignItems: "center", gap: 9, marginTop: 5 },
   deckMeta: { color: "#D2D8D4", fontSize: 12 },
+  deckGenres: { color: C.teal, fontSize: 10, fontWeight: "800", marginTop: 7 },
   deckScore: { color: C.teal, fontSize: 12, fontWeight: "900" },
   deckNote: { color: "#B9C2BD", fontSize: 11, lineHeight: 15, marginTop: 10 },
   swipeActions: {
     flexDirection: "row",
     justifyContent: "center",
-    gap: 22,
+    gap: 14,
     alignItems: "center",
     marginTop: 22,
   },
+  signalAction: { alignItems: "center", gap: 6 },
+  signalLabel: { color: C.muted, fontSize: 9, fontWeight: "800" },
   passAction: {
     width: 54,
     height: 54,

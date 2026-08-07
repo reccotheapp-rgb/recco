@@ -2,7 +2,7 @@
   "expo": {
     "name": "Recco",
     "slug": "recco",
-    "version": "0.3.1",
+    "version": "0.3.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "description": "Your media life, all in one place.",
@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "com.reccotheapp.recco",
-      "versionCode": 10,
+      "versionCode": 11,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -26,6 +26,15 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "plugins": [
+      [
+        "expo-navigation-bar",
+        {
+          "enforceContrast": false,
+          "style": "light"
+        }
+      ]
+    ],
     "extra": {
       "eas": {
         "projectId": "26243ec6-0a27-435e-9edc-6c018d9d0086"
