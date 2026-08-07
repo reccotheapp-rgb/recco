@@ -56,6 +56,15 @@ export type EpisodeReview = {
   rating: number | null;
 };
 
+export type TasteAction = "LOVE" | "SAVE" | "PASS" | "NOT_FOR_ME";
+
+const actionWeights: Record<TasteAction, number> = {
+  LOVE: 4,
+  SAVE: 2,
+  PASS: -1,
+  NOT_FOR_ME: -4,
+};
+
 export async function syncMediaState(
   item: MediaItem,
   status: MediaStatus,
@@ -90,16 +99,41 @@ export async function loadMediaStates(): Promise<StoredMediaState[]> {
   return (data ?? []) as StoredMediaState[];
 }
 
-export async function syncSwipeAction(mediaId: string, action: "KEEP" | "PASS") {
+export async function syncSwipeAction(item: MediaItem, action: TasteAction) {
   const user = await ensureGuestSession();
   if (!supabase || !user) return;
+  const metadata = {
+    genres: item.genres ?? [],
+    year: item.year,
+    score: item.score ?? null,
+  };
   const { error } = await supabase.from("swipe_actions").upsert({
     user_id: user.id,
-    media_id: mediaId,
+    media_id: item.id,
     action,
+    media_kind: item.kind,
+    metadata,
     created_at: new Date().toISOString(),
   });
   if (error) throw error;
+
+  const { data: profile, error: profileError } = await supabase
+    .from("taste_profiles")
+    .select("feature_weights")
+    .maybeSingle();
+  if (profileError) throw profileError;
+  const weights: Record<string, number> = { ...(profile?.feature_weights ?? {}) };
+  const weight = actionWeights[action];
+  const features = [`kind:${item.kind}`, ...(item.genres ?? [])];
+  for (const feature of features) {
+    weights[feature] = Math.max(-20, Math.min(20, (weights[feature] ?? 0) + weight));
+  }
+  const { error: upsertError } = await supabase.from("taste_profiles").upsert({
+    user_id: user.id,
+    feature_weights: weights,
+    updated_at: new Date().toISOString(),
+  });
+  if (upsertError) throw upsertError;
 }
 
 export async function loadSwipeHistory(): Promise<string[]> {
@@ -112,6 +146,17 @@ export async function loadSwipeHistory(): Promise<string[]> {
     .limit(2000);
   if (error) throw error;
   return (data ?? []).map((entry) => entry.media_id);
+}
+
+export async function loadTasteProfile(): Promise<Record<string, number>> {
+  const user = await ensureGuestSession();
+  if (!supabase || !user) return {};
+  const { data, error } = await supabase
+    .from("taste_profiles")
+    .select("feature_weights")
+    .maybeSingle();
+  if (error) throw error;
+  return (data?.feature_weights ?? {}) as Record<string, number>;
 }
 
 export async function loadEpisodeReviews(

@@ -9,4 +9,5 @@ export type MediaItem = {
   image: string;
   note: string;
   score?: number;
+  genres?: string[];
 };

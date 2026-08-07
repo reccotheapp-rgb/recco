@@ -22,26 +22,21 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import {
-  continueItems,
-  picks,
-  showEpisodes,
-  upcomingItems,
-} from "./src/data/media";
 import type { MediaItem as Media, MediaKind as Kind } from "./src/types/media";
-import { getTitleDetails, getTrendingMedia, searchMedia } from "./src/services/media";
+import { getBookRecommendations, getTitleDetails, getTrendingMedia, searchMedia } from "./src/services/media";
 import {
   ensureGuestSession,
   loadEpisodeReviews,
   loadMediaStates,
   loadSwipeHistory,
+  loadTasteProfile,
   saveEpisodeReview,
   syncMediaState,
   syncSwipeAction,
+  type TasteAction,
 } from "./src/services/supabase";
 
 type Tab = "Home" | "Discover" | "Search" | "Library" | "Profile";
-const allMedia = [...picks, ...continueItems, ...upcomingItems];
 const kindIcon: Record<Kind, keyof typeof Ionicons.glyphMap> = {
   FILM: "film-outline",
   SHOW: "tv-outline",
@@ -112,6 +107,9 @@ function ReccoApp() {
   const [filter, setFilter] = useState<"ALL" | Kind>("ALL");
   const [remoteResults, setRemoteResults] = useState<Media[]>([]);
   const [trending, setTrending] = useState<Media[]>([]);
+  const [books, setBooks] = useState<Media[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState(false);
   const [searching, setSearching] = useState(false);
   const [onboarding, setOnboarding] = useState(true);
   const [curating, setCurating] = useState(false);
@@ -127,7 +125,7 @@ function ReccoApp() {
   const findItem = (id: string) =>
     selected?.id === id
       ? selected
-      : libraryItems[id] ?? trending.find((item) => item.id === id) ?? allMedia.find((item) => item.id === id);
+      : libraryItems[id] ?? trending.find((item) => item.id === id) ?? books.find((item) => item.id === id);
   const save = (id: string) => {
     buzz();
     setSaved((items) =>
@@ -149,7 +147,7 @@ function ReccoApp() {
         () => undefined,
       );
   };
-  const liveCatalog = trending.length ? trending : allMedia;
+  const liveCatalog = trending;
   const shelfItems = Object.values(libraryItems).filter(
     (item) => saved.includes(item.id) || tracked.includes(item.id),
   );
@@ -165,11 +163,20 @@ function ReccoApp() {
       ),
     [filter, query, liveCatalog],
   );
+  const bookQueryFromTaste = (weights: Record<string, number>) => {
+    const [feature] = Object.entries(weights)
+      .filter(([name, value]) => !name.startsWith("kind:") && value > 0)
+      .sort(([, left], [, right]) => right - left)[0] ?? [];
+    return feature || "subject:fiction";
+  };
   useEffect(() => {
     void ensureGuestSession()
-      .then(() => loadMediaStates())
-      .then((states) => {
-        if (!states.length) return;
+      .then(async () => {
+        const [states, taste] = await Promise.all([loadMediaStates(), loadTasteProfile()]);
+        return { states, taste };
+      })
+      .then(({ states, taste }) => {
+        if (!states.length) return getBookRecommendations(bookQueryFromTaste(taste));
         setLibraryItems(Object.fromEntries(states.map((state) => [state.media_id, {
           id: state.media_id,
           kind: state.media_kind,
@@ -183,11 +190,17 @@ function ReccoApp() {
         setTracked(states.filter((state) => state.status === "IN_PROGRESS").map((state) => state.media_id));
         setRating(Object.fromEntries(states.filter((state) => state.rating).map((state) => [state.media_id, state.rating ?? 0])));
         setEpisodeProgress(Object.assign({}, ...states.map((state) => state.progress ?? {})));
+        return getBookRecommendations(bookQueryFromTaste(taste));
       })
+      .then((liveBooks) => liveBooks && setBooks(liveBooks))
       .catch(() => undefined);
     void getTrendingMedia()
-      .then(setTrending)
-      .catch(() => undefined);
+      .then((liveTitles) => {
+        setTrending(liveTitles);
+        setCatalogError(false);
+      })
+      .catch(() => setCatalogError(true))
+      .finally(() => setCatalogLoading(false));
   }, []);
   useEffect(() => {
     AsyncStorage.getItem("recco-library-v1")
@@ -339,14 +352,14 @@ function ReccoApp() {
     </View>
   );
 
-  const heroItem = trending[0] ?? picks[0];
+  const heroItem = trending[0];
   const Home = () => (
     <ScrollView
       showsVerticalScrollIndicator={false}
       contentContainerStyle={styles.scroll}
     >
       <Header />
-      <Tap onPress={() => open(heroItem)} style={styles.hero}>
+      {heroItem ? <Tap onPress={() => open(heroItem)} style={styles.hero}>
         <Image source={{ uri: heroItem.image }} style={styles.heroImage} />
         <LinearGradient
           colors={["rgba(8,13,12,.12)", "rgba(8,13,12,.96)"]}
@@ -369,7 +382,13 @@ function ReccoApp() {
             <Ionicons name="arrow-forward" size={16} color={C.ink} />
           </View>
         </View>
-      </Tap>
+      </Tap> : (
+        <View style={styles.homeCatalogState}>
+          <Ionicons name={catalogError ? "cloud-offline-outline" : "sparkles-outline"} size={30} color={C.teal} />
+          <Text style={styles.emptyTitle}>{catalogLoading ? "Loading live picks" : "Live picks are unavailable"}</Text>
+          <Text style={styles.emptyText}>{catalogError ? "Check your connection and reopen Recco to load the live catalog." : "Fetching films, series, and books for you."}</Text>
+        </View>
+      )}
       <Section title={trackingItems.length ? "Continue tracking" : "Start tracking"} action="VIEW LIBRARY">
         <ScrollView
           horizontal
@@ -399,7 +418,7 @@ function ReccoApp() {
       </Section>
       <Section title="Trending this week">
         <View style={styles.wall}>
-          {(trending.length ? trending.slice(4, 8) : picks.slice(1)).map(
+          {trending.slice(4, 8).map(
             (item) => (
               <Poster item={item} key={item.id} />
             ),
@@ -434,7 +453,7 @@ function ReccoApp() {
           <Text style={styles.heroEyebrow}>TASTE CURATION</Text>
           <Text style={styles.curationTitle}>Teach Recco{`\n`}your taste.</Text>
           <Text style={styles.curationText}>
-            Swipe through real films and series from TMDB.
+            Swipe through real films and series. Every signal shapes your next book match too.
           </Text>
         </View>
         <View style={styles.curationIcon}>
@@ -447,7 +466,7 @@ function ReccoApp() {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.chips}
       >
-        {(["ALL", "FILM", "SHOW"] as const).map((item) => (
+        {(["ALL", "FILM", "SHOW", "BOOK"] as const).map((item) => (
           <Tap
             key={item}
             onPress={() => setFilter(item)}
@@ -699,11 +718,15 @@ function ReccoApp() {
           <SwipeDeck
             items={trending}
             onClose={() => setCurating(false)}
-            onSave={(id) => {
-              save(id);
-              void syncSwipeAction(id, "KEEP").catch(() => undefined);
+            onSignal={(item, action) => {
+              buzz();
+              if (action === "LOVE" || action === "SAVE") {
+                setSaved((items) => items.includes(item.id) ? items : [...items, item.id]);
+                setLibraryItems((items) => ({ ...items, [item.id]: item }));
+                void syncMediaState(item, "SAVED", { rating: rating[item.id] }).catch(() => undefined);
+              }
+              void syncSwipeAction(item, action).catch(() => undefined);
             }}
-            onPass={(id) => void syncSwipeAction(id, "PASS").catch(() => undefined)}
           />
         )}
         {onboarding && <Onboarding onDone={() => setOnboarding(false)} />}
@@ -782,13 +805,11 @@ function Stat({ value, label }: { value: string; label: string }) {
 function SwipeDeck({
   items,
   onClose,
-  onSave,
-  onPass,
+  onSignal,
 }: {
   items: Media[];
   onClose: () => void;
-  onSave: (id: string) => void;
-  onPass: (id: string) => void;
+  onSignal: (item: Media, action: TasteAction) => void;
 }) {
   const [index, setIndex] = useState(0);
   const [queue, setQueue] = useState<Media[]>(items);
@@ -849,16 +870,15 @@ function SwipeDeck({
     resetAfterSwipe.current = false;
     swipeInFlight.current = false;
   }, [index, card]);
-  const advance = (save: boolean) => {
+  const advance = (action: TasteAction) => {
     if (!item || swipeInFlight.current) return;
     swipeInFlight.current = true;
     Animated.timing(card, {
-      toValue: { x: save ? 500 : -500, y: 25 },
+      toValue: { x: action === "LOVE" || action === "SAVE" ? 500 : -500, y: 25 },
       duration: 180,
       useNativeDriver: true,
     }).start(() => {
-      if (save) onSave(item.id);
-      else onPass(item.id);
+      onSignal(item, action);
       seenIds.current.add(item.id);
       resetAfterSwipe.current = true;
       setIndex((value) => value + 1);
@@ -873,9 +893,9 @@ function SwipeDeck({
         }),
         onPanResponderRelease: (_, gesture) =>
           gesture.dx > 85
-            ? advance(true)
+            ? advance("SAVE")
             : gesture.dx < -85
-              ? advance(false)
+              ? advance("PASS")
               : Animated.spring(card, {
                   toValue: { x: 0, y: 0 },
                   useNativeDriver: true,
@@ -1022,11 +1042,17 @@ function SwipeDeck({
         </Animated.View>
       </View>
       <View style={styles.swipeActions}>
-        <Tap onPress={() => advance(false)} style={styles.passAction}>
+        <Tap onPress={() => advance("NOT_FOR_ME")} style={styles.notForMeAction}>
           <Ionicons name="close" size={25} color="#E9917A" />
         </Tap>
-        <Tap onPress={() => advance(true)} style={styles.keepAction}>
+        <Tap onPress={() => advance("PASS")} style={styles.passAction}>
+          <Ionicons name="arrow-back" size={20} color={C.ivory} />
+        </Tap>
+        <Tap onPress={() => advance("SAVE")} style={styles.keepAction}>
           <Ionicons name="bookmark" size={20} color={C.ink} />
+        </Tap>
+        <Tap onPress={() => advance("LOVE")} style={styles.loveAction}>
+          <Ionicons name="heart" size={21} color={C.ink} />
         </Tap>
       </View>
     </View>
@@ -1074,7 +1100,7 @@ function Detail({
       active = false;
     };
   }, [item.id, season]);
-  const episodes = details?.episodes ?? showEpisodes[item.id] ?? [];
+  const episodes = details?.episodes ?? [];
   const selectedSeason = season ?? details?.selectedSeason ?? 1;
   useEffect(() => {
     if (item.kind !== "SHOW") return;
@@ -1434,6 +1460,17 @@ const styles = StyleSheet.create({
     borderRadius: 19,
   },
   heroButtonText: { color: C.ink, fontSize: 11, fontWeight: "900" },
+  homeCatalogState: {
+    minHeight: 245,
+    borderRadius: 24,
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.line,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 30,
+    marginBottom: 28,
+  },
   section: { marginBottom: 37 },
   sectionTop: {
     flexDirection: "row",
@@ -2069,11 +2106,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.line,
   },
+  notForMeAction: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: C.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#6A3D38",
+  },
   keepAction: {
     width: 58,
     height: 58,
     borderRadius: 29,
     backgroundColor: C.gold,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loveAction: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: C.teal,
     alignItems: "center",
     justifyContent: "center",
   },

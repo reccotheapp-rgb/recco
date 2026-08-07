@@ -1,6 +1,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const TMDB = "https://api.themoviedb.org/3";
+const movieGenres: Record<number, string> = { 12: "Adventure", 14: "Fantasy", 16: "Animation", 18: "Drama", 27: "Horror", 28: "Action", 35: "Comedy", 36: "History", 37: "Western", 53: "Thriller", 80: "Crime", 99: "Documentary", 878: "Science Fiction", 9648: "Mystery", 10402: "Music", 10749: "Romance", 10751: "Family", 10752: "War" };
+const tvGenres: Record<number, string> = { 16: "Animation", 18: "Drama", 35: "Comedy", 37: "Western", 80: "Crime", 99: "Documentary", 9648: "Mystery", 10751: "Family", 10759: "Action & Adventure", 10762: "Kids", 10763: "News", 10764: "Reality", 10765: "Sci-Fi & Fantasy", 10766: "Soap", 10767: "Talk", 10768: "War & Politics" };
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, apikey, content-type",
@@ -11,6 +13,10 @@ type GoogleBooksResponse = { items?: TmdbItem[] };
 
 function mediaItem(item: TmdbItem) {
   const mediaType = item.media_type === "tv" ? "tv" : "movie";
+  const genreMap = mediaType === "tv" ? tvGenres : movieGenres;
+  const genres = Array.isArray(item.genre_ids)
+    ? item.genre_ids.map(Number).map((id) => genreMap[id]).filter(Boolean)
+    : [];
   return {
     id: `tmdb-${mediaType}-${item.id}`,
     kind: mediaType === "tv" ? "SHOW" : "FILM",
@@ -20,6 +26,7 @@ function mediaItem(item: TmdbItem) {
     image: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : "",
     note: String(item.overview ?? ""),
     score: Number(item.vote_average ?? 0),
+    genres,
   };
 }
 
@@ -45,7 +52,7 @@ function bookItem(volume: TmdbItem) {
     image: thumbnail,
     note: plainText(info.description),
     score: Number(info.averageRating ?? 0),
-    categories,
+    genres: categories,
   };
 }
 

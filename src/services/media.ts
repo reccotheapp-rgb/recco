@@ -5,7 +5,7 @@ import { getCatalogAccessToken } from "./supabase";
 type MediaSearchResponse = { results: MediaItem[] };
 
 async function mediaCatalog(
-  action: "discover" | "search" | "details",
+  action: "discover" | "search" | "books" | "details",
   params: Record<string, string> = {},
 ) {
   const token = await getCatalogAccessToken();
@@ -53,6 +53,10 @@ export async function searchMedia(query: string): Promise<MediaItem[]> {
 
 export async function getTrendingMedia(page = 1): Promise<MediaItem[]> {
   return ((await mediaCatalog("discover", { page: String(page) })) as MediaSearchResponse).results;
+}
+
+export async function getBookRecommendations(query = "subject:fiction"): Promise<MediaItem[]> {
+  return ((await mediaCatalog("books", { q: query })) as MediaSearchResponse).results;
 }
 
 export async function getTitleDetails(
