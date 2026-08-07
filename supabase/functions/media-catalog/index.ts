@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const TMDB = "https://api.themoviedb.org/3";
+const UPSTREAM_TIMEOUT_MS = 10_000;
 const movieGenres: Record<number, string> = { 12: "Adventure", 14: "Fantasy", 16: "Animation", 18: "Drama", 27: "Horror", 28: "Action", 35: "Comedy", 36: "History", 37: "Western", 53: "Thriller", 80: "Crime", 99: "Documentary", 878: "Science Fiction", 9648: "Mystery", 10402: "Music", 10749: "Romance", 10751: "Family", 10752: "War" };
 const tvGenres: Record<number, string> = { 16: "Animation", 18: "Drama", 35: "Comedy", 37: "Western", 80: "Crime", 99: "Documentary", 9648: "Mystery", 10751: "Family", 10759: "Action & Adventure", 10762: "Kids", 10763: "News", 10764: "Reality", 10765: "Sci-Fi & Fantasy", 10766: "Soap", 10767: "Talk", 10768: "War & Politics" };
 const corsHeaders = {
@@ -10,6 +11,18 @@ const corsHeaders = {
 
 type TmdbItem = Record<string, unknown>;
 type GoogleBooksResponse = { items?: TmdbItem[] };
+
+async function upstreamFetch(input: string | URL, init: RequestInit = {}) {
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+    });
+  } catch (error) {
+    console.error("Upstream catalogue request failed", error);
+    return null;
+  }
+}
 
 function mediaItem(item: TmdbItem) {
   const mediaType = item.media_type === "tv" ? "tv" : "movie";
@@ -64,8 +77,8 @@ async function searchBooks(query: string, maxResults = 8) {
   endpoint.searchParams.set("printType", "books");
   endpoint.searchParams.set("maxResults", String(Math.min(40, Math.max(1, maxResults))));
   endpoint.searchParams.set("key", key);
-  const response = await fetch(endpoint);
-  if (!response.ok) return [];
+  const response = await upstreamFetch(endpoint);
+  if (!response?.ok) return [];
   const data = (await response.json()) as GoogleBooksResponse;
   return (data.items ?? []).map(bookItem);
 }
@@ -95,8 +108,8 @@ Deno.serve(async (request) => {
   const headers = { Authorization: `Bearer ${token}`, Accept: "application/json" };
 
   if (action === "discover") {
-    const upstream = await fetch(`${TMDB}/trending/all/week?language=en-US&page=${page}`, { headers });
-    if (!upstream.ok) return Response.json({ results: [] }, { status: 502, headers: corsHeaders });
+    const upstream = await upstreamFetch(`${TMDB}/trending/all/week?language=en-US&page=${page}`, { headers });
+    if (!upstream?.ok) return Response.json({ results: [] }, { status: 502, headers: corsHeaders });
     const data = (await upstream.json()) as { results?: TmdbItem[] };
     return Response.json({ results: (data.results ?? []).filter((item) => item.media_type === "movie" || item.media_type === "tv").map(mediaItem) }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
   }
@@ -105,15 +118,15 @@ Deno.serve(async (request) => {
     const query = url.searchParams.get("q")?.trim();
     if (!query) return Response.json({ error: "A search query is required" }, { status: 400, headers: corsHeaders });
     const [upstream, books] = await Promise.all([
-      fetch(`${TMDB}/search/multi?query=${encodeURIComponent(query)}&include_adult=false&language=en-US`, { headers }),
+      upstreamFetch(`${TMDB}/search/multi?query=${encodeURIComponent(query)}&include_adult=false&language=en-US`, { headers }),
       searchBooks(query),
     ]);
-    const data = upstream.ok ? (await upstream.json()) as { results?: TmdbItem[] } : { results: [] };
+    const data = upstream?.ok ? (await upstream.json()) as { results?: TmdbItem[] } : { results: [] };
     const screenResults = (data.results ?? [])
       .filter((item) => item.media_type === "movie" || item.media_type === "tv")
       .slice(0, 12)
       .map(mediaItem);
-    if (!upstream.ok && !books.length) return Response.json({ error: "Media search is unavailable" }, { status: 502, headers: corsHeaders });
+    if (!upstream?.ok && !books.length) return Response.json({ error: "Media search is unavailable" }, { status: 502, headers: corsHeaders });
     return Response.json({ results: [...screenResults, ...books] }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
   }
 
@@ -127,8 +140,8 @@ Deno.serve(async (request) => {
   const type = url.searchParams.get("type") === "tv" ? "tv" : "movie";
   const id = url.searchParams.get("id") ?? "";
   if (!/^\d+$/.test(id)) return Response.json({ error: "A valid title is required" }, { status: 400, headers: corsHeaders });
-  const titleResponse = await fetch(`${TMDB}/${type}/${id}?language=en-US`, { headers });
-  if (!titleResponse.ok) return Response.json({ error: "TMDB details are unavailable" }, { status: 502, headers: corsHeaders });
+  const titleResponse = await upstreamFetch(`${TMDB}/${type}/${id}?language=en-US`, { headers });
+  if (!titleResponse?.ok) return Response.json({ error: "TMDB details are unavailable" }, { status: 502, headers: corsHeaders });
   const title = (await titleResponse.json()) as TmdbItem;
   const seasons = Array.isArray(title.seasons) ? (title.seasons as TmdbItem[]).filter((season) => Number(season.season_number) > 0).map((season) => ({ number: Number(season.season_number), name: String(season.name ?? `Season ${season.season_number}`), episodeCount: Number(season.episode_count ?? 0) })) : [];
   const requestedSeason = Number(url.searchParams.get("season") ?? 1);
@@ -136,8 +149,8 @@ Deno.serve(async (request) => {
   const episodeRuntime = Array.isArray(title.episode_run_time) ? Number(title.episode_run_time[0] ?? 0) : 0;
   let episodes: TmdbItem[] = [];
   if (type === "tv" && season) {
-    const seasonResponse = await fetch(`${TMDB}/tv/${id}/season/${season}?language=en-US`, { headers });
-    if (seasonResponse.ok) episodes = ((await seasonResponse.json()) as { episodes?: TmdbItem[] }).episodes ?? [];
+    const seasonResponse = await upstreamFetch(`${TMDB}/tv/${id}/season/${season}?language=en-US`, { headers });
+    if (seasonResponse?.ok) episodes = ((await seasonResponse.json()) as { episodes?: TmdbItem[] }).episodes ?? [];
   }
   return Response.json({
     overview: String(title.overview ?? ""),
