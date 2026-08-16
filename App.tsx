@@ -360,6 +360,7 @@ function ReccoApp() {
         source={{ uri: item.image }}
         style={wide ? styles.wideImage : styles.poster}
       />
+      <View style={[styles.posterTypeRail, { backgroundColor: kindAccent[item.kind] }]} />
       <LinearGradient
         colors={["transparent", "rgba(6,10,9,.92)"]}
         style={styles.posterShade}
@@ -402,6 +403,11 @@ function ReccoApp() {
   );
 
   const heroItem = trending[0];
+  const tasteLeaders = Object.entries(tasteWeights)
+    .filter(([feature, weight]) => !feature.startsWith("kind:") && !feature.startsWith("vibe:") && weight > 0)
+    .sort(([, left], [, right]) => right - left)
+    .slice(0, 3)
+    .map(([feature]) => feature);
   const Home = () => (
     <ScrollView
       showsVerticalScrollIndicator={false}
@@ -439,6 +445,20 @@ function ReccoApp() {
           <Text style={styles.emptyText}>{catalogError ? "Check your connection and reopen Recco to load the live catalog." : "Fetching films, series, and books for you."}</Text>
         </View>
       )}
+      <Tap onPress={() => setCurating(true)} style={styles.tastePulse}>
+        <View style={styles.tastePulseCopy}>
+          <Text style={styles.heroEyebrow}>YOUR TASTE, LIVE</Text>
+          <Text style={styles.tastePulseTitle}>
+            {tasteLeaders.length ? tasteLeaders.join(" · ") : "Start with a feeling, not a filter."}
+          </Text>
+          <Text style={styles.tastePulseText}>Your saves, ratings and swipe signals shape every next pick.</Text>
+        </View>
+        <View style={styles.tasteOrbit}>
+          <View style={styles.tasteOrbitInner} />
+          <View style={styles.tasteOrbitDot} />
+          <Ionicons name="sparkles" size={18} color={C.ink} />
+        </View>
+      </Tap>
       <Section title={trackingItems.length ? "Continue tracking" : "Start tracking"} action="VIEW LIBRARY">
         <ScrollView
           horizontal
@@ -511,6 +531,19 @@ function ReccoApp() {
           </ScrollView>
         </Section>
       )}
+      <Section title="Choose your next world">
+        <View style={styles.worldGrid}>
+          {(["FILM", "SHOW", "BOOK"] as const).map((kind) => (
+            <Tap key={kind} onPress={() => { setFilter(kind); setTab("Discover"); }} style={[styles.worldCard, { borderColor: `${kindAccent[kind]}80` }]}>
+              <View style={[styles.worldIcon, { backgroundColor: kindAccent[kind] }]}>
+                <Ionicons name={kindIcon[kind]} size={20} color={C.ink} />
+              </View>
+              <Text style={styles.worldTitle}>{kindName[kind]}</Text>
+              <Text style={styles.worldText}>{kind === "FILM" ? "A complete night in." : kind === "SHOW" ? "A world to return to." : "A story to live with."}</Text>
+            </Tap>
+          ))}
+        </View>
+      </Section>
       <Section title="Your taste, in motion">
         <Tap onPress={() => setCurating(true)} style={styles.tasteCta}>
           <View style={styles.tasteCtaIcon}>
@@ -1686,6 +1719,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 30,
     marginBottom: 28,
   },
+  tastePulse: { minHeight: 127, padding: 17, borderRadius: 22, marginBottom: 36, overflow: "hidden", backgroundColor: "#12322D", borderWidth: 1, borderColor: "#236256", flexDirection: "row", alignItems: "center" },
+  tastePulseCopy: { flex: 1, paddingRight: 14 },
+  tastePulseTitle: { color: C.ivory, fontSize: 19, lineHeight: 22, letterSpacing: -0.5, fontWeight: "900", marginTop: 7 },
+  tastePulseText: { color: "#B7D3CB", fontSize: 10, lineHeight: 14, marginTop: 7 },
+  tasteOrbit: { width: 70, height: 70, borderRadius: 35, backgroundColor: C.teal, alignItems: "center", justifyContent: "center" },
+  tasteOrbitInner: { position: "absolute", width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: "rgba(14,21,19,.35)" },
+  tasteOrbitDot: { position: "absolute", width: 9, height: 9, right: 11, top: 12, borderRadius: 5, backgroundColor: C.ink },
   section: { marginBottom: 37 },
   sectionTop: {
     flexDirection: "row",
@@ -1713,6 +1753,7 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     backgroundColor: C.surface2,
   },
+  posterTypeRail: { position: "absolute", top: 0, left: 11, right: 11, height: 3, borderBottomLeftRadius: 3, borderBottomRightRadius: 3 },
   posterShade: { ...StyleSheet.absoluteFill },
   posterInfo: { position: "absolute", left: 10, right: 9, bottom: 9 },
   mediaKind: {
@@ -1733,6 +1774,11 @@ const styles = StyleSheet.create({
   },
   progressFill: { height: 3, borderRadius: 2, backgroundColor: C.teal },
   wall: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  worldGrid: { flexDirection: "row", gap: 9 },
+  worldCard: { flex: 1, minHeight: 146, padding: 11, borderRadius: 18, backgroundColor: C.surface, borderWidth: 1 },
+  worldIcon: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center" },
+  worldTitle: { color: C.ivory, fontSize: 14, fontWeight: "900", marginTop: 13 },
+  worldText: { color: C.muted, fontSize: 10, lineHeight: 14, marginTop: 4 },
   homeCta: {
     marginTop: 6,
     marginBottom: 24,
