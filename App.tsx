@@ -615,7 +615,7 @@ function ReccoApp() {
           ? "SEARCHING RECCO..."
           : query
             ? `${remoteResults.length} RESULTS`
-            : `EXPLORE ${kindName[searchKind].toUpperCase()}S`}
+            : `EXPLORE ${searchKind === "SHOW" ? "SERIES" : `${kindName[searchKind].toUpperCase()}S`}`}
       </Text>
       <View style={styles.searchCardGrid}>
         {(query ? remoteResults : results.filter((item) => item.kind === searchKind)).map((item) => (
@@ -692,7 +692,7 @@ function ReccoApp() {
               <View style={styles.libraryCardInfo}>
                 <Text numberOfLines={2} style={styles.libraryCardTitle}>{shortTitle(item.title, 32)}</Text>
                 <Text numberOfLines={1} style={styles.libraryCardMeta}>
-                  {item.kind === "SHOW" ? "Series" : "Film"} · {item.year || item.by}
+                  {kindName[item.kind]} · {item.year || item.by}
                 </Text>
                 {tracked.includes(item.id) && (
                   <View style={styles.libraryProgress}>
@@ -1097,7 +1097,7 @@ function SwipeDeck({
                 <Text style={[styles.mediaKind, { color: kindAccent[next.kind] }]}>{kindName[next.kind]}</Text>
                 <Text numberOfLines={2} style={styles.nextDeckTitle}>{shortTitle(next.title, 38)}</Text>
                 <Text numberOfLines={1} style={styles.nextDeckMeta}>
-                  {next.score ? `★ ${next.score.toFixed(1)} · ` : ""}{next.kind === "SHOW" ? "Series" : "Film"} · {next.year}
+                  {next.score ? `★ ${next.score.toFixed(1)} · ` : ""}{kindName[next.kind]} · {next.year}
                 </Text>
               </View>
             </>
@@ -1148,7 +1148,7 @@ function SwipeDeck({
             <Text numberOfLines={2} style={styles.deckTitle}>{shortTitle(item.title, 42)}</Text>
             <View style={styles.deckFacts}>
               {item.score ? <Text style={styles.deckScore}>★ {item.score.toFixed(1)}</Text> : null}
-              <Text style={styles.deckMeta}>{item.kind === "SHOW" ? "Series" : "Film"}</Text>
+              <Text style={styles.deckMeta}>{kindName[item.kind]}</Text>
             </View>
             <Text style={styles.deckMeta}>
               {item.by} · {item.year}
