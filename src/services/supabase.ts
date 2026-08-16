@@ -36,6 +36,7 @@ export type MediaStatus = "SAVED" | "IN_PROGRESS" | "COMPLETED" | "PAUSED" | "DR
 type MediaSyncOptions = {
   rating?: number;
   progress?: Record<string, boolean>;
+  tracking?: Record<string, unknown>;
 };
 
 export type StoredMediaState = {
@@ -46,7 +47,7 @@ export type StoredMediaState = {
   status: MediaStatus;
   rating: number | null;
   progress: Record<string, boolean>;
-  metadata: Partial<MediaItem>;
+  metadata: Partial<MediaItem> & { tracking?: Record<string, unknown> };
 };
 
 export type MediaReview = {
@@ -99,6 +100,7 @@ export async function syncMediaState(
         note: item.note,
         score: item.score ?? null,
         genres: item.genres ?? [],
+        tracking: options.tracking ?? {},
       },
       updated_at: new Date().toISOString(),
     });
@@ -175,6 +177,24 @@ export async function loadTasteProfile(): Promise<Record<string, number>> {
     .maybeSingle();
   if (error) throw error;
   return (data?.feature_weights ?? {}) as Record<string, number>;
+}
+
+export async function seedTasteProfile(features: string[]) {
+  const user = await ensureGuestSession();
+  if (!supabase || !user || !features.length) return;
+  const { data: profile, error } = await supabase
+    .from("taste_profiles")
+    .select("feature_weights")
+    .maybeSingle();
+  if (error) throw error;
+  const weights: Record<string, number> = { ...(profile?.feature_weights ?? {}) };
+  for (const feature of features) weights[feature] = Math.min(20, (weights[feature] ?? 0) + 2);
+  const { error: upsertError } = await supabase.from("taste_profiles").upsert({
+    user_id: user.id,
+    feature_weights: weights,
+    updated_at: new Date().toISOString(),
+  });
+  if (upsertError) throw upsertError;
 }
 
 export async function loadEpisodeReviews(

@@ -30,6 +30,7 @@ import {
   loadMediaStates,
   loadSwipeHistory,
   loadTasteProfile,
+  seedTasteProfile,
   saveEpisodeReview,
   saveMediaReview,
   syncMediaState,
@@ -38,6 +39,7 @@ import {
 } from "./src/services/supabase";
 
 type Tab = "Home" | "Discover" | "Search" | "Library" | "Profile";
+type TrackingMeta = { bookProgress?: number; watchedOn?: string; rewatch?: boolean };
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const RECCO_MARK = require("./assets/recco-mark-v1.png");
 const kindIcon: Record<Kind, keyof typeof Ionicons.glyphMap> = {
@@ -131,6 +133,7 @@ function ReccoApp() {
   const [libraryItems, setLibraryItems] = useState<Record<string, Media>>({});
   const [completed, setCompleted] = useState<string[]>([]);
   const [episodeProgress, setEpisodeProgress] = useState<Record<string, boolean>>({});
+  const [trackingMeta, setTrackingMeta] = useState<Record<string, TrackingMeta>>({});
   const [hydrated, setHydrated] = useState(false);
   const [query, setQuery] = useState("");
   const [searchKind, setSearchKind] = useState<"FILM" | "SHOW" | "BOOK">("FILM");
@@ -144,7 +147,7 @@ function ReccoApp() {
   const [onboarding, setOnboarding] = useState(false);
   const [curating, setCurating] = useState(false);
   const [tasteWeights, setTasteWeights] = useState<Record<string, number>>({});
-  const [libraryFilter, setLibraryFilter] = useState<"ALL" | "SAVED" | "TRACKING">("ALL");
+  const [libraryFilter, setLibraryFilter] = useState<"ALL" | "SAVED" | "TRACKING" | "FINISHED">("ALL");
   const buzz = () =>
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
       () => undefined,
@@ -185,14 +188,16 @@ function ReccoApp() {
     [trending, books],
   );
   const allShelfItems = Object.values(libraryItems).filter(
-    (item) => saved.includes(item.id) || tracked.includes(item.id),
+    (item) => saved.includes(item.id) || tracked.includes(item.id) || completed.includes(item.id),
   );
   const shelfItems = allShelfItems.filter((item) =>
     libraryFilter === "SAVED"
       ? saved.includes(item.id) && !tracked.includes(item.id)
       : libraryFilter === "TRACKING"
         ? tracked.includes(item.id)
-        : saved.includes(item.id) || tracked.includes(item.id),
+        : libraryFilter === "FINISHED"
+          ? completed.includes(item.id)
+          : saved.includes(item.id) || tracked.includes(item.id) || completed.includes(item.id),
   );
   const trackingItems = allShelfItems.filter((item) => tracked.includes(item.id));
   const results = useMemo(
@@ -234,8 +239,10 @@ function ReccoApp() {
         }])));
         setSaved(states.filter((state) => state.status === "SAVED").map((state) => state.media_id));
         setTracked(states.filter((state) => state.status === "IN_PROGRESS").map((state) => state.media_id));
+        setCompleted(states.filter((state) => state.status === "COMPLETED").map((state) => state.media_id));
         setRating(Object.fromEntries(states.filter((state) => state.rating).map((state) => [state.media_id, state.rating ?? 0])));
         setEpisodeProgress(Object.assign({}, ...states.map((state) => state.progress ?? {})));
+        setTrackingMeta(Object.fromEntries(states.map((state) => [state.media_id, state.metadata.tracking ?? {}])));
         return getBookRecommendations(bookQueryFromTaste(taste));
       })
       .then((liveBooks) => liveBooks && setBooks(liveBooks))
@@ -258,6 +265,7 @@ function ReccoApp() {
           rating?: Record<string, number>;
           completed?: string[];
           episodeProgress?: Record<string, boolean>;
+          trackingMeta?: Record<string, TrackingMeta>;
           libraryItems?: Record<string, Media>;
         };
         setSaved(data.saved ?? []);
@@ -265,18 +273,24 @@ function ReccoApp() {
         setRating(data.rating ?? {});
         setCompleted(data.completed ?? []);
         setEpisodeProgress(data.episodeProgress ?? {});
+        setTrackingMeta(data.trackingMeta ?? {});
         setLibraryItems(data.libraryItems ?? {});
       })
       .catch(() => undefined)
       .finally(() => setHydrated(true));
   }, []);
   useEffect(() => {
+    AsyncStorage.getItem("recco-onboarded-v2")
+      .then((value) => setOnboarding(!value))
+      .catch(() => undefined);
+  }, []);
+  useEffect(() => {
     if (!hydrated) return;
     void AsyncStorage.setItem(
       "recco-library-v1",
-      JSON.stringify({ saved, tracked, rating, completed, episodeProgress, libraryItems }),
+      JSON.stringify({ saved, tracked, rating, completed, episodeProgress, trackingMeta, libraryItems }),
     );
-  }, [saved, tracked, rating, completed, episodeProgress, libraryItems, hydrated]);
+  }, [saved, tracked, rating, completed, episodeProgress, trackingMeta, libraryItems, hydrated]);
   useEffect(() => {
     if (query.trim().length < 2) {
       setRemoteResults([]);
@@ -703,14 +717,14 @@ function ReccoApp() {
         </Tap>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.libraryFilters}>
-        {(["ALL", "TRACKING", "SAVED"] as const).map((entry) => (
+        {(["ALL", "TRACKING", "SAVED", "FINISHED"] as const).map((entry) => (
           <Tap
             key={entry}
             onPress={() => setLibraryFilter(entry)}
             style={[styles.libraryFilter, libraryFilter === entry && styles.libraryFilterActive]}
           >
             <Text style={[styles.libraryFilterText, libraryFilter === entry && styles.libraryFilterTextActive]}>
-              {entry === "ALL" ? "Everything" : entry[0] + entry.slice(1).toLowerCase()}
+              {entry === "ALL" ? "Everything" : entry === "FINISHED" ? "Finished" : entry[0] + entry.slice(1).toLowerCase()}
             </Text>
           </Tap>
         ))}
@@ -730,7 +744,7 @@ function ReccoApp() {
               />
               <View style={styles.libraryCardTop}>
                 <Text style={[styles.mediaKind, { color: kindAccent[item.kind] }]}>
-                  {kindName[item.kind].toUpperCase()} · {tracked.includes(item.id) ? "IN PROGRESS" : "SAVED"}
+                  {kindName[item.kind].toUpperCase()} · {completed.includes(item.id) ? "FINISHED" : tracked.includes(item.id) ? "IN PROGRESS" : "SAVED"}
                 </Text>
               </View>
               <View style={styles.libraryCardInfo}>
@@ -784,6 +798,10 @@ function ReccoApp() {
             </View>
           ))}
         </View>
+        <Tap onPress={() => setOnboarding(true)} style={styles.retakeTaste}>
+          <Text style={styles.retakeTasteText}>REFRESH YOUR TASTE SIGNALS</Text>
+          <Ionicons name="arrow-forward" size={15} color={C.teal} />
+        </Tap>
       </View>
       <Section title="This year">
         <View style={styles.yearRow}>
@@ -840,9 +858,17 @@ function ReccoApp() {
             tracked={tracked.includes(selected.id)}
             rating={rating[selected.id] ?? 0}
             episodeProgress={episodeProgress}
+            trackingMeta={trackingMeta[selected.id] ?? {}}
             onClose={() => setSelected(null)}
             onSave={() => save(selected.id)}
             onTrack={() => track(selected.id)}
+            onComplete={() => {
+              setCompleted((items) => items.includes(selected.id) ? items.filter((id) => id !== selected.id) : [...items, selected.id]);
+              setTracked((items) => items.filter((id) => id !== selected.id));
+              setSaved((items) => items.includes(selected.id) ? items : [...items, selected.id]);
+              setLibraryItems((items) => ({ ...items, [selected.id]: selected }));
+              void syncMediaState(selected, completed.includes(selected.id) ? "SAVED" : "COMPLETED", { rating: rating[selected.id], progress: episodeProgress, tracking: trackingMeta[selected.id] }).catch(() => undefined);
+            }}
             onRate={(value) => {
               setRating((values) => ({ ...values, [selected.id]: value }));
               void syncMediaState(selected, tracked.includes(selected.id) ? "IN_PROGRESS" : "SAVED", { rating: value, progress: episodeProgress }).catch(() => undefined);
@@ -854,6 +880,20 @@ function ReccoApp() {
                 return progress;
               })
             }
+            onUpdateTracking={(patch) => {
+              setTrackingMeta((current) => {
+                const nextMeta = { ...(current[selected.id] ?? {}), ...patch };
+                const next = { ...current, [selected.id]: nextMeta };
+                void syncMediaState(selected, tracked.includes(selected.id) ? "IN_PROGRESS" : "SAVED", {
+                  rating: rating[selected.id],
+                  progress: episodeProgress,
+                  tracking: nextMeta,
+                }).catch(() => undefined);
+                return next;
+              });
+              if (!saved.includes(selected.id)) setSaved((items) => [...items, selected.id]);
+              setLibraryItems((items) => ({ ...items, [selected.id]: selected }));
+            }}
           />
         )}
         {curating && (
@@ -879,7 +919,12 @@ function ReccoApp() {
             }}
           />
         )}
-        {onboarding && <Onboarding onDone={() => setOnboarding(false)} />}
+        {onboarding && <Onboarding onDone={(features) => {
+          setOnboarding(false);
+          void AsyncStorage.setItem("recco-onboarded-v2", "true");
+          setTasteWeights((current) => features.reduce((next, feature) => ({ ...next, [feature]: (next[feature] ?? 0) + 2 }), { ...current }));
+          void seedTasteProfile(features).catch(() => undefined);
+        }} />}
       </SafeAreaView>
     </View>
   );
@@ -1259,22 +1304,28 @@ function Detail({
   tracked,
   rating,
   episodeProgress,
+  trackingMeta,
   onClose,
   onSave,
   onTrack,
+  onComplete,
   onRate,
   onEpisodeToggle,
+  onUpdateTracking,
 }: {
   item: Media;
   saved: boolean;
   tracked: boolean;
   rating: number;
   episodeProgress: Record<string, boolean>;
+  trackingMeta: TrackingMeta;
   onClose: () => void;
   onSave: () => void;
   onTrack: () => void;
+  onComplete: () => void;
   onRate: (value: number) => void;
   onEpisodeToggle: (id: string) => void;
+  onUpdateTracking: (patch: TrackingMeta) => void;
 }) {
   const insets = useSafeAreaInsets();
   const [details, setDetails] = useState<Awaited<ReturnType<typeof getTitleDetails>>>(null);
@@ -1356,6 +1407,37 @@ function Detail({
               ))}
             </View>
           ) : null}
+          {item.kind === "BOOK" && (
+            <View style={styles.trackerCard}>
+              <View style={styles.trackerTop}>
+                <View>
+                  <Text style={[styles.mediaKind, { color: kindAccent.BOOK }]}>READING PROGRESS</Text>
+                  <Text style={styles.trackerTitle}>{trackingMeta.bookProgress ?? 0}% through this book</Text>
+                </View>
+                <Ionicons name="book-outline" size={21} color={kindAccent.BOOK} />
+              </View>
+              <View style={styles.bookProgressBar}><View style={[styles.bookProgressFill, { width: `${trackingMeta.bookProgress ?? 0}%` }]} /></View>
+              <View style={styles.trackerActions}>
+                <Tap onPress={() => onUpdateTracking({ bookProgress: Math.max(0, (trackingMeta.bookProgress ?? 0) - 10) })} style={styles.trackerStep}><Text style={styles.trackerStepText}>− 10%</Text></Tap>
+                <Tap onPress={() => onUpdateTracking({ bookProgress: Math.min(100, (trackingMeta.bookProgress ?? 0) + 10) })} style={styles.trackerStep}><Text style={styles.trackerStepText}>+ 10%</Text></Tap>
+              </View>
+            </View>
+          )}
+          {item.kind === "FILM" && (
+            <View style={styles.trackerCard}>
+              <View style={styles.trackerTop}>
+                <View>
+                  <Text style={[styles.mediaKind, { color: kindAccent.FILM }]}>FILM DIARY</Text>
+                  <Text style={styles.trackerTitle}>{trackingMeta.watchedOn ? `Watched ${trackingMeta.watchedOn}` : "Log it when you watch"}</Text>
+                </View>
+                <Ionicons name="film-outline" size={21} color={kindAccent.FILM} />
+              </View>
+              <View style={styles.trackerActions}>
+                <Tap onPress={() => onUpdateTracking({ watchedOn: trackingMeta.watchedOn ? undefined : new Date().toISOString().slice(0, 10) })} style={[styles.trackerStep, trackingMeta.watchedOn && styles.trackerStepActive]}><Text style={[styles.trackerStepText, trackingMeta.watchedOn && styles.trackerStepTextActive]}>{trackingMeta.watchedOn ? "Watched" : "Watch today"}</Text></Tap>
+                <Tap onPress={() => onUpdateTracking({ rewatch: !trackingMeta.rewatch })} style={[styles.trackerStep, trackingMeta.rewatch && styles.trackerStepActive]}><Text style={[styles.trackerStepText, trackingMeta.rewatch && styles.trackerStepTextActive]}>Rewatch</Text></Tap>
+              </View>
+            </View>
+          )}
           {item.kind === "SHOW" && details?.seasons?.length ? (
             <View style={styles.seasonBlock}>
               <View style={styles.episodeHeading}>
@@ -1527,41 +1609,50 @@ function Detail({
             />
           </Tap>
         </View>
+        <Tap onPress={onComplete} style={styles.completeBtn}>
+          <Ionicons name="checkmark-circle-outline" size={17} color={C.teal} />
+          <Text style={styles.completeText}>Mark as finished</Text>
+        </Tap>
       </View>
     </View>
   );
 }
-function Onboarding({ onDone }: { onDone: () => void }) {
+function Onboarding({ onDone }: { onDone: (features: string[]) => void }) {
+  const [step, setStep] = useState(0);
+  const [answers, setAnswers] = useState<string[]>([]);
+  const steps = [
+    { eyebrow: "STEP 1 OF 3 · YOUR WORLDS", title: "What do you reach for?", body: "Pick the feelings or genres you never get tired of.", options: ["Drama", "Mystery", "Fantasy", "Comedy", "Romance", "Science Fiction"] },
+    { eyebrow: "STEP 2 OF 3 · YOUR ENERGY", title: "How should a story feel?", body: "These signals make the first Reccos feel personal.", options: ["Comfort", "Intense", "Escapist", "Cerebral", "Tender", "Unexpected"] },
+    { eyebrow: "STEP 3 OF 3 · YOUR FORMATS", title: "Where should we start?", body: "You can add more worlds whenever you want.", options: ["kind:FILM", "kind:SHOW", "kind:BOOK"] },
+  ];
+  const current = steps[step];
+  const label = (value: string) => value.startsWith("kind:") ? `${kindName[value.slice(5) as Kind]}s` : value;
+  const toggle = (value: string) => setAnswers((currentAnswers) => currentAnswers.includes(value) ? currentAnswers.filter((entry) => entry !== value) : [...currentAnswers, value]);
   return (
     <View style={styles.onboard}>
-      <Brand />
+      <View style={styles.onboardHeader}><Brand /><Text style={styles.onboardStep}>{step + 1}/3</Text></View>
       <View style={styles.onboardArt}>
-        <LinearGradient
-          colors={["#1F5C53", "#16302C", "#0E1513"]}
-          style={StyleSheet.absoluteFill}
-        />
-        <View style={styles.onboardOrbOne} />
-        <View style={styles.onboardOrbTwo} />
-        <View style={styles.onboardMark}>
-          <Image source={RECCO_MARK} style={styles.onboardMarkImage} />
-        </View>
-        <Text style={styles.onboardArtText}>Your media,{`\n`}remembered.</Text>
+        <LinearGradient colors={["#1F5C53", "#16302C", "#0E1513"]} style={StyleSheet.absoluteFill} />
+        <View style={styles.onboardOrbOne} /><View style={styles.onboardOrbTwo} />
+        <View style={styles.onboardMark}><Image source={RECCO_MARK} style={styles.onboardMarkImage} /></View>
+        <Text style={styles.onboardArtText}>{step === 0 ? "Your taste,{`\n`}in motion." : step === 1 ? "Follow the{`\n`}feeling." : "Every format,{`\n`}one profile."}</Text>
       </View>
       <View style={styles.onboardCopy}>
-        <Text style={styles.heroEyebrow}>A PERSONAL MEDIA TRACKER</Text>
-        <Text style={styles.onboardTitle}>
-          Keep every story{`\n`}that moved you.
-        </Text>
-        <Text style={styles.onboardBody}>
-          Track what you watch, read and listen to. Recco turns your history
-          into your next great find.
-        </Text>
+        <Text style={styles.heroEyebrow}>{current.eyebrow}</Text>
+        <Text style={styles.onboardTitle}>{current.title}</Text>
+        <Text style={styles.onboardBody}>{current.body}</Text>
+        <View style={styles.onboardChoices}>
+          {current.options.map((option) => {
+            const active = answers.includes(option);
+            return <Tap key={option} onPress={() => toggle(option)} style={[styles.onboardChoice, active && styles.onboardChoiceActive]}><Text style={[styles.onboardChoiceText, active && styles.onboardChoiceTextActive]}>{label(option)}</Text>{active && <Ionicons name="checkmark" size={15} color={C.ink} />}</Tap>;
+          })}
+        </View>
       </View>
-      <Tap onPress={onDone} style={styles.onboardButton}>
-        <Text style={styles.primaryText}>Begin your archive</Text>
+      <Tap onPress={() => step < steps.length - 1 ? setStep((value) => value + 1) : onDone(answers)} style={styles.onboardButton}>
+        <Text style={styles.primaryText}>{step < steps.length - 1 ? "Continue" : "Build my Reccos"}</Text>
         <Ionicons name="arrow-forward" size={18} color={C.ink} />
       </Tap>
-      <Text style={styles.onboardFine}>Your taste stays yours.</Text>
+      <Text style={styles.onboardFine}>Private by default. You can change these signals anytime.</Text>
     </View>
   );
 }
@@ -2042,6 +2133,8 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     marginTop: 8,
   },
+  retakeTaste: { marginTop: 19, paddingTop: 13, borderTopWidth: 1, borderTopColor: C.line, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  retakeTasteText: { color: C.teal, fontSize: 9, letterSpacing: 0.8, fontWeight: "900" },
   tagRow: { flexDirection: "row", gap: 7, marginTop: 17 },
   tag: {
     borderRadius: 13,
@@ -2131,6 +2224,16 @@ const styles = StyleSheet.create({
   genreRow: { flexDirection: "row", gap: 7, flexWrap: "wrap", marginTop: 16 },
   genrePill: { backgroundColor: C.surface2, borderRadius: 12, paddingHorizontal: 9, paddingVertical: 6 },
   genreText: { color: C.muted, fontSize: 9, fontWeight: "800" },
+  trackerCard: { marginTop: 20, padding: 14, borderRadius: 17, backgroundColor: C.surface, borderWidth: 1, borderColor: C.line },
+  trackerTop: { flexDirection: "row", justifyContent: "space-between", gap: 12 },
+  trackerTitle: { color: C.ivory, fontSize: 14, fontWeight: "900", marginTop: 5 },
+  trackerActions: { flexDirection: "row", gap: 8, marginTop: 13 },
+  trackerStep: { flex: 1, minHeight: 38, borderRadius: 11, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: C.line },
+  trackerStepActive: { backgroundColor: "rgba(68,221,193,.16)", borderColor: C.teal },
+  trackerStepText: { color: C.muted, fontSize: 10, fontWeight: "900" },
+  trackerStepTextActive: { color: C.teal },
+  bookProgressBar: { height: 7, borderRadius: 4, overflow: "hidden", backgroundColor: C.surface2, marginTop: 15 },
+  bookProgressFill: { height: "100%", borderRadius: 4, backgroundColor: kindAccent.BOOK },
   seasonBlock: { marginTop: 3 },
   episodeHeading: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   episodeCount: { color: C.teal, fontSize: 9, fontWeight: "900", letterSpacing: 0.7, marginTop: 14 },
@@ -2220,6 +2323,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   primaryText: { color: C.ink, fontSize: 12, fontWeight: "900" },
+  completeBtn: { minHeight: 38, marginTop: 10, borderRadius: 12, flexDirection: "row", gap: 7, alignItems: "center", justifyContent: "center" },
+  completeText: { color: C.teal, fontSize: 11, fontWeight: "900" },
   onboard: {
     ...StyleSheet.absoluteFill,
     zIndex: 25,
@@ -2228,6 +2333,8 @@ const styles = StyleSheet.create({
     paddingBottom: Platform.OS === "web" ? 14 : 20,
     backgroundColor: C.ink,
   },
+  onboardHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  onboardStep: { color: C.muted, fontSize: 11, fontWeight: "900", letterSpacing: 1 },
   onboardArt: {
     height: Platform.OS === "web" ? 184 : 285,
     borderRadius: 24,
@@ -2263,6 +2370,11 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginTop: 12,
   },
+  onboardChoices: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 21 },
+  onboardChoice: { minHeight: 39, paddingHorizontal: 12, borderRadius: 13, borderWidth: 1, borderColor: C.line, backgroundColor: C.surface, flexDirection: "row", alignItems: "center", gap: 6 },
+  onboardChoiceActive: { borderColor: C.teal, backgroundColor: C.teal },
+  onboardChoiceText: { color: C.ivory, fontSize: 11, fontWeight: "800" },
+  onboardChoiceTextActive: { color: C.ink },
   onboardButton: {
     height: 54,
     borderRadius: 15,
