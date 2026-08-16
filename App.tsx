@@ -39,6 +39,7 @@ import {
 
 type Tab = "Home" | "Discover" | "Search" | "Library" | "Profile";
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+const RECCO_MARK = require("./assets/recco-mark-v1.png");
 const kindIcon: Record<Kind, keyof typeof Ionicons.glyphMap> = {
   FILM: "film-outline",
   SHOW: "tv-outline",
@@ -98,6 +99,15 @@ function Tap({
     >
       {children}
     </AnimatedPressable>
+  );
+}
+
+function Brand({ inverse = false, compact = false }: { inverse?: boolean; compact?: boolean }) {
+  return (
+    <View style={styles.brandLockup}>
+      <Image source={RECCO_MARK} style={[styles.brandMark, compact && styles.brandMarkCompact]} />
+      {!compact && <Text style={[styles.brand, inverse && styles.brandInverse]}>Recco</Text>}
+    </View>
   );
 }
 
@@ -331,7 +341,7 @@ function ReccoApp() {
 
   const Header = ({ label }: { label?: string }) => (
     <View style={styles.header}>
-      <Text style={styles.brand}>Recco</Text>
+      <Brand />
       {label ? (
         <Text style={styles.headerLabel}>{label}</Text>
       ) : (
@@ -404,11 +414,12 @@ function ReccoApp() {
           colors={["rgba(8,13,12,.12)", "rgba(8,13,12,.96)"]}
           style={styles.heroShade}
         />
+        <Image source={RECCO_MARK} style={styles.heroMark} />
         <View style={styles.heroTop}>
-          <Text style={styles.heroEyebrow}>CURATED RECOMMENDATION</Text>
+          <Text style={styles.heroEyebrow}>TONIGHT, FOR YOU</Text>
           <View style={styles.match}>
             <Ionicons name="sparkles" size={12} color={C.ink} />
-            <Text style={styles.matchText}>96% FOR YOU</Text>
+            <Text style={styles.matchText}>TASTE MATCH</Text>
           </View>
         </View>
         <View style={styles.heroBottom}>
@@ -721,7 +732,7 @@ function ReccoApp() {
       <Header label="PROFILE" />
       <View style={styles.profile}>
         <View style={styles.profileAvatar}>
-          <Ionicons name="person" size={32} color={C.ink} />
+          <Image source={RECCO_MARK} style={styles.profileMark} />
         </View>
         <Text style={styles.profileName}>Your Recco</Text>
         <Text style={styles.profileHandle}>A private media archive</Text>
@@ -1490,7 +1501,7 @@ function Detail({
 function Onboarding({ onDone }: { onDone: () => void }) {
   return (
     <View style={styles.onboard}>
-      <Text style={styles.brand}>Recco</Text>
+      <Brand />
       <View style={styles.onboardArt}>
         <LinearGradient
           colors={["#1F5C53", "#16302C", "#0E1513"]}
@@ -1499,7 +1510,7 @@ function Onboarding({ onDone }: { onDone: () => void }) {
         <View style={styles.onboardOrbOne} />
         <View style={styles.onboardOrbTwo} />
         <View style={styles.onboardMark}>
-          <Ionicons name="sparkles" size={34} color={C.ink} />
+          <Image source={RECCO_MARK} style={styles.onboardMarkImage} />
         </View>
         <Text style={styles.onboardArtText}>Your media,{`\n`}remembered.</Text>
       </View>
@@ -1578,12 +1589,16 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: Platform.OS === "web" ? 17 : 25,
   },
+  brandLockup: { flexDirection: "row", alignItems: "center", gap: 7 },
+  brandMark: { width: 28, height: 28, borderRadius: 8 },
+  brandMarkCompact: { width: 22, height: 22, borderRadius: 6 },
   brand: {
     color: C.teal,
     fontSize: 26,
     fontWeight: "900",
     letterSpacing: -1.4,
   },
+  brandInverse: { color: C.ivory },
   headerLabel: {
     color: C.muted,
     fontSize: 10,
@@ -1607,6 +1622,7 @@ const styles = StyleSheet.create({
   },
   heroImage: { width: "100%", height: "100%" },
   heroShade: { ...StyleSheet.absoluteFill },
+  heroMark: { position: "absolute", width: 96, height: 96, right: 13, top: 55, opacity: 0.82 },
   heroTop: {
     position: "absolute",
     left: 18,
@@ -1954,6 +1970,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  profileMark: { width: 56, height: 56, borderRadius: 17 },
   profileInitials: { color: C.ivory, fontSize: 23, fontWeight: "900" },
   profileName: {
     color: C.ivory,
@@ -2173,7 +2190,8 @@ const styles = StyleSheet.create({
   },
   onboardOrbOne: { position: "absolute", width: 180, height: 180, borderRadius: 90, backgroundColor: "rgba(68,221,193,.22)", right: -36, top: -40 },
   onboardOrbTwo: { position: "absolute", width: 150, height: 150, borderRadius: 75, borderWidth: 1, borderColor: "rgba(232,230,222,.3)", left: -35, bottom: -62 },
-  onboardMark: { position: "absolute", width: 74, height: 74, borderRadius: 37, backgroundColor: C.teal, alignItems: "center", justifyContent: "center", right: 23, bottom: 22 },
+  onboardMark: { position: "absolute", width: 74, height: 74, borderRadius: 37, backgroundColor: C.teal, alignItems: "center", justifyContent: "center", right: 23, bottom: 22, overflow: "hidden" },
+  onboardMarkImage: { width: 64, height: 64, borderRadius: 20 },
   onboardArtText: {
     position: "absolute",
     left: 18,

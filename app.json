@@ -4,7 +4,7 @@
     "slug": "recco",
     "version": "0.3.2",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/recco-mark-v1.png",
     "description": "Your media life, all in one place.",
     "scheme": "recco",
     "userInterfaceStyle": "automatic",
@@ -16,10 +16,9 @@
       "versionCode": 11,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#0E1513",
+        "foregroundImage": "./assets/recco-mark-v1.png",
+        "monochromeImage": "./assets/recco-mark-v1.png"
       },
       "predictiveBackGestureEnabled": false
     },
