@@ -24,8 +24,8 @@ async function upstreamFetch(input: string | URL, init: RequestInit = {}) {
   }
 }
 
-function mediaItem(item: TmdbItem) {
-  const mediaType = item.media_type === "tv" ? "tv" : "movie";
+function mediaItem(item: TmdbItem, forcedType?: "movie" | "tv") {
+  const mediaType = forcedType ?? (item.media_type === "tv" ? "tv" : "movie");
   const genreMap = mediaType === "tv" ? tvGenres : movieGenres;
   const genres = Array.isArray(item.genre_ids)
     ? item.genre_ids.map(Number).map((id) => genreMap[id]).filter(Boolean)
@@ -61,12 +61,23 @@ function bookItem(volume: TmdbItem) {
     kind: "BOOK",
     title: String(info.title ?? "Untitled book"),
     by: authors.join(", ") || "Unknown author",
-    year: String(info.publishedDate ?? "").slice(0, 4) || "â€”",
+    year: String(info.publishedDate ?? "").slice(0, 4) || "—",
     image: thumbnail,
     note: plainText(info.description),
     score: Number(info.averageRating ?? 0),
     genres: categories,
   };
+}
+
+// Recco is a leisure-media product. Keep scholarly papers, proceedings and
+// reference-heavy titles out of its default catalogue without preventing us
+// from adding a deliberate research mode later.
+function isConsumerBook(volume: TmdbItem) {
+  const info = (volume.volumeInfo ?? {}) as TmdbItem;
+  if (String(info.printType ?? "BOOK") !== "BOOK") return false;
+  const categories = Array.isArray(info.categories) ? info.categories.map(String).join(" ") : "";
+  const searchable = `${info.title ?? ""} ${info.subtitle ?? ""} ${categories}`;
+  return !/\b(proceedings|conference|thesis|dissertation|journal|research\s+(paper|report|methods)|academic\s+journal|textbook|study\s+guide|workbook)\b/i.test(searchable);
 }
 
 async function searchBooks(query: string, maxResults = 8) {
@@ -80,7 +91,7 @@ async function searchBooks(query: string, maxResults = 8) {
   const response = await upstreamFetch(endpoint);
   if (!response?.ok) return [];
   const data = (await response.json()) as GoogleBooksResponse;
-  return (data.items ?? []).map(bookItem);
+  return (data.items ?? []).filter(isConsumerBook).map(bookItem).slice(0, maxResults);
 }
 
 async function requireUser(request: Request) {
@@ -117,17 +128,23 @@ Deno.serve(async (request) => {
   if (action === "search") {
     const query = url.searchParams.get("q")?.trim();
     if (!query) return Response.json({ error: "A search query is required" }, { status: 400, headers: corsHeaders });
-    const [upstream, books] = await Promise.all([
-      upstreamFetch(`${TMDB}/search/multi?query=${encodeURIComponent(query)}&include_adult=false&language=en-US`, { headers }),
-      searchBooks(query),
-    ]);
+    const requestedKind = url.searchParams.get("kind") ?? "ALL";
+    if (!["ALL", "FILM", "SHOW", "BOOK"].includes(requestedKind)) {
+      return Response.json({ error: "An unsupported media type was requested" }, { status: 400, headers: corsHeaders });
+    }
+    if (requestedKind === "BOOK") {
+      const books = await searchBooks(query, 16);
+      return Response.json({ results: books }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
+    }
+    const endpoint = requestedKind === "FILM" ? "movie" : requestedKind === "SHOW" ? "tv" : "multi";
+    const upstream = await upstreamFetch(`${TMDB}/search/${endpoint}?query=${encodeURIComponent(query)}&include_adult=false&language=en-US`, { headers });
     const data = upstream?.ok ? (await upstream.json()) as { results?: TmdbItem[] } : { results: [] };
     const screenResults = (data.results ?? [])
-      .filter((item) => item.media_type === "movie" || item.media_type === "tv")
+      .filter((item) => endpoint !== "multi" || item.media_type === "movie" || item.media_type === "tv")
       .slice(0, 12)
-      .map(mediaItem);
-    if (!upstream?.ok && !books.length) return Response.json({ error: "Media search is unavailable" }, { status: 502, headers: corsHeaders });
-    return Response.json({ results: [...screenResults, ...books] }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
+      .map((item) => mediaItem(item, requestedKind === "FILM" ? "movie" : requestedKind === "SHOW" ? "tv" : undefined));
+    if (!upstream?.ok) return Response.json({ error: "Media search is unavailable" }, { status: 502, headers: corsHeaders });
+    return Response.json({ results: screenResults }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
   }
 
   if (action === "books") {

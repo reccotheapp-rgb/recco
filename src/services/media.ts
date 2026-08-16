@@ -44,10 +44,12 @@ export type TitleDetails = {
  * The mobile app talks only to Recco's backend. It must never call TMDB
  * directly or include a TMDB credential in the compiled app.
  */
-export async function searchMedia(query: string): Promise<MediaItem[]> {
+export type SearchKind = "FILM" | "SHOW" | "BOOK";
+
+export async function searchMedia(query: string, kind: SearchKind): Promise<MediaItem[]> {
   if (!query.trim()) return [];
 
-  const data = (await mediaCatalog("search", { q: query.trim() })) as MediaSearchResponse;
+  const data = (await mediaCatalog("search", { q: query.trim(), kind })) as MediaSearchResponse;
   return data.results;
 }
 

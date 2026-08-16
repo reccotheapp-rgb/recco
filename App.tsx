@@ -123,6 +123,7 @@ function ReccoApp() {
   const [episodeProgress, setEpisodeProgress] = useState<Record<string, boolean>>({});
   const [hydrated, setHydrated] = useState(false);
   const [query, setQuery] = useState("");
+  const [searchKind, setSearchKind] = useState<"FILM" | "SHOW" | "BOOK">("FILM");
   const [filter, setFilter] = useState<"ALL" | Kind>("ALL");
   const [remoteResults, setRemoteResults] = useState<Media[]>([]);
   const [trending, setTrending] = useState<Media[]>([]);
@@ -275,7 +276,7 @@ function ReccoApp() {
     let active = true;
     const timeout = setTimeout(() => {
       setSearching(true);
-      searchMedia(query)
+      searchMedia(query, searchKind)
         .then((items) => {
           if (active) setRemoteResults(items);
         })
@@ -290,7 +291,7 @@ function ReccoApp() {
       active = false;
       clearTimeout(timeout);
     };
-  }, [query]);
+  }, [query, searchKind]);
   useEffect(() => {
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
       if (selected) {
@@ -413,7 +414,7 @@ function ReccoApp() {
         <View style={styles.heroBottom}>
           <Text numberOfLines={2} style={styles.heroTitle}>{shortTitle(heroItem.title, 42)}</Text>
           <Text style={styles.heroBody}>
-            {heroItem.note || "Trending now on TMDB."}
+            {heroItem.note || "A live pick shaped around the stories you keep."}
           </Text>
           <View style={styles.heroButton}>
             <Text style={styles.heroButtonText}>Explore the Recco</Text>
@@ -454,7 +455,22 @@ function ReccoApp() {
           )}
         </ScrollView>
       </Section>
-      <Section title="Trending this week">
+      {heroItem && books[0] && (
+        <Section title="Across your worlds">
+          <Tap onPress={() => open(books[0])} style={styles.crossMediaCard}>
+            <Image source={{ uri: heroItem.image }} style={styles.crossMediaPoster} />
+            <View style={styles.crossMediaRule} />
+            <Image source={{ uri: books[0].image }} style={styles.crossMediaPoster} />
+            <View style={styles.crossMediaCopy}>
+              <Text style={styles.heroEyebrow}>ONE TASTE · TWO FORMATS</Text>
+              <Text numberOfLines={2} style={styles.crossMediaTitle}>If {shortTitle(heroItem.title, 22)} pulls you in, read {shortTitle(books[0].title, 25)} next.</Text>
+              <Text style={styles.crossMediaMeta}>A cross-media Recco, tuned by your signals.</Text>
+            </View>
+            <Ionicons name="arrow-forward" size={18} color={C.teal} />
+          </Tap>
+        </Section>
+      )}
+      <Section title="For tonight">
         <View style={styles.wall}>
           {trending.slice(4, 8).map(
             (item) => (
@@ -485,15 +501,13 @@ function ReccoApp() {
         </Section>
       )}
       <Section title="Your taste, in motion">
-        <Tap onPress={() => setCurating(true)} style={styles.activity}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>J</Text>
+        <Tap onPress={() => setCurating(true)} style={styles.tasteCta}>
+          <View style={styles.tasteCtaIcon}>
+            <Ionicons name="git-network-outline" size={21} color={C.ink} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.activityText}>
-              Teach Recco what stays with you.
-            </Text>
-            <Text style={styles.activityMeta}>FOUR SIGNALS · FILMS, SHOWS AND BOOKS</Text>
+            <Text style={styles.tasteCtaTitle}>Build a taste map, not just a watchlist.</Text>
+            <Text style={styles.activityMeta}>MOOD · PACE · FAMILIARITY · COMMITMENT</Text>
           </View>
           <Ionicons name="arrow-forward" size={20} color={C.teal} />
         </Tap>
@@ -573,14 +587,22 @@ function ReccoApp() {
       contentContainerStyle={styles.scroll}
     >
       <Header label="SEARCH" />
-      <Text style={styles.display}>Find anything.</Text>
+      <Text style={styles.display}>Find your{`\n`}{searchKind === "SHOW" ? "next series." : searchKind === "BOOK" ? "next book." : "next film."}</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.searchTypeRail}>
+        {(["FILM", "SHOW", "BOOK"] as const).map((kind) => {
+          const active = searchKind === kind;
+          return <Tap key={kind} onPress={() => setSearchKind(kind)} style={[styles.searchType, active && styles.searchTypeActive]}>
+            <Ionicons name={kindIcon[kind]} size={15} color={active ? C.ink : kindAccent[kind]} />
+            <Text style={[styles.searchTypeText, active && styles.searchTypeTextActive]}>{kind === "SHOW" ? "Series" : `${kindName[kind]}s`}</Text>
+          </Tap>;
+        })}
+      </ScrollView>
       <View style={styles.searchBox}>
         <Ionicons name="search" size={19} color={C.muted} />
         <TextInput
-          autoFocus
           value={query}
           onChangeText={setQuery}
-          placeholder="Titles, people, artists..."
+          placeholder={`Search ${kindName[searchKind].toLowerCase()} titles...`}
           placeholderTextColor={C.muted}
           autoCorrect={false}
           autoCapitalize="none"
@@ -590,27 +612,25 @@ function ReccoApp() {
       </View>
       <Text style={styles.resultLabel}>
         {searching
-          ? "SEARCHING TMDB..."
+          ? "SEARCHING RECCO..."
           : query
             ? `${remoteResults.length} RESULTS`
-            : "START EXPLORING"}
+            : `EXPLORE ${kindName[searchKind].toUpperCase()}S`}
       </Text>
-      <View style={styles.searchResults}>
-        {(query ? remoteResults : results).map((item) => (
+      <View style={styles.searchCardGrid}>
+        {(query ? remoteResults : results.filter((item) => item.kind === searchKind)).map((item) => (
           <Tap
             key={item.id}
             onPress={() => open(item)}
-            style={styles.searchRow}
+            style={styles.searchCard}
           >
-            <Image source={{ uri: item.image }} style={styles.searchImage} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.mediaKind}>{item.kind}</Text>
-              <Text numberOfLines={2} style={styles.searchTitle}>{shortTitle(item.title, 36)}</Text>
-              <Text style={styles.searchMeta}>
-                {item.by} · {item.year}
-              </Text>
+            <Image source={{ uri: item.image }} style={styles.searchCardImage} />
+            <LinearGradient colors={["transparent", "rgba(4,8,7,.94)"]} style={styles.posterShade} />
+            <View style={styles.searchCardInfo}>
+              <Text style={[styles.mediaKind, { color: kindAccent[item.kind] }]}>{kindName[item.kind]}</Text>
+              <Text numberOfLines={2} style={styles.searchTitle}>{shortTitle(item.title, 32)}</Text>
+              <Text numberOfLines={1} style={styles.searchMeta}>{item.by} · {item.year}</Text>
             </View>
-            <Ionicons name="arrow-up-outline" size={17} color={C.gold} />
           </Tap>
         ))}
       </View>
@@ -728,6 +748,10 @@ function ReccoApp() {
           <Stat value={String(Object.values(episodeProgress).filter(Boolean).length)} label="EPISODES" />
         </View>
       </Section>
+      <View style={styles.creditsCard}>
+        <Text style={styles.heroEyebrow}>DATA & CREDITS</Text>
+        <Text style={styles.creditsText}>This product uses the TMDB API but is not endorsed or certified by TMDB.</Text>
+      </View>
     </ScrollView>
   );
   const page =
@@ -792,6 +816,7 @@ function ReccoApp() {
           <SwipeDeck
             items={swipeItems}
             onClose={() => setCurating(false)}
+            onOpen={open}
             onSignal={(item, action, vibes) => {
               buzz();
               if (action === "LOVE" || action === "SAVE") {
@@ -886,10 +911,12 @@ function Stat({ value, label }: { value: string; label: string }) {
 function SwipeDeck({
   items,
   onClose,
+  onOpen,
   onSignal,
 }: {
   items: Media[];
   onClose: () => void;
+  onOpen: (item: Media) => void;
   onSignal: (item: Media, action: TasteAction, vibes: string[]) => void;
 }) {
   const [index, setIndex] = useState(0);
@@ -1020,7 +1047,7 @@ function SwipeDeck({
           <Text style={styles.swipeDoneText}>
             {deckError
               ? "Check your connection, then try again."
-              : "Getting real films and series from TMDB for you."}
+              : "Loading a live mix of films, series and books for you."}
           </Text>
           {deckError && (
             <Tap
@@ -1112,6 +1139,10 @@ function SwipeDeck({
           >
             <Text style={styles.passStampText}>PASS</Text>
           </Animated.View>
+          <Tap onPress={() => onOpen(item)} style={styles.deckPreviewButton}>
+            <Ionicons name="information" size={18} color={C.ivory} />
+            <Text style={styles.deckPreviewText}>WHY</Text>
+          </Tap>
           <View style={styles.deckInfo}>
             <Text style={[styles.mediaKind, { color: kindAccent[item.kind] }]}>{kindName[item.kind]}</Text>
             <Text numberOfLines={2} style={styles.deckTitle}>{shortTitle(item.title, 42)}</Text>
@@ -1701,6 +1732,23 @@ const styles = StyleSheet.create({
   },
   homeCtaTitle: { color: C.ivory, fontSize: 16, fontWeight: "800", marginTop: 7 },
   homeCtaText: { color: C.muted, fontSize: 11, lineHeight: 16, marginTop: 4 },
+  crossMediaCard: {
+    minHeight: 174,
+    borderRadius: 22,
+    overflow: "hidden",
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.line,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  crossMediaPoster: { width: 48, height: 72, borderRadius: 10, backgroundColor: C.surface2 },
+  crossMediaRule: { width: 1, height: 42, marginTop: 15, backgroundColor: C.line },
+  crossMediaCopy: { position: "absolute", left: 13, right: 48, bottom: 14 },
+  crossMediaTitle: { color: C.ivory, fontSize: 16, lineHeight: 19, letterSpacing: -0.4, fontWeight: "900", marginTop: 6 },
+  crossMediaMeta: { color: C.muted, fontSize: 10, lineHeight: 14, marginTop: 6 },
   activity: {
     flexDirection: "row",
     alignItems: "center",
@@ -1721,6 +1769,9 @@ const styles = StyleSheet.create({
   activityText: { color: C.ivory, fontSize: 12, lineHeight: 17 },
   activityEm: { color: C.teal, fontStyle: "italic" },
   activityMeta: { color: C.muted, fontSize: 10, marginTop: 3 },
+  tasteCta: { flexDirection: "row", alignItems: "center", gap: 12, padding: 15, borderRadius: 18, backgroundColor: "#12322D", borderWidth: 1, borderColor: "#236256" },
+  tasteCtaIcon: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: C.teal },
+  tasteCtaTitle: { color: C.ivory, fontSize: 13, lineHeight: 17, fontWeight: "900" },
   display: {
     color: C.ivory,
     fontSize: 34,
@@ -1790,6 +1841,11 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, color: C.ivory, fontSize: 14, height: "100%" },
   searchPage: { flex: 1 },
+  searchTypeRail: { gap: 8, paddingBottom: 14, paddingRight: 20 },
+  searchType: { height: 38, paddingHorizontal: 12, borderRadius: 19, borderWidth: 1, borderColor: C.line, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: C.surface },
+  searchTypeActive: { backgroundColor: C.gold, borderColor: C.gold },
+  searchTypeText: { color: C.muted, fontSize: 10, fontWeight: "900" },
+  searchTypeTextActive: { color: C.ink },
   resultLabel: {
     color: C.muted,
     fontSize: 9,
@@ -1799,6 +1855,10 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   searchResults: { gap: 9 },
+  searchCardGrid: { flexDirection: "row", flexWrap: "wrap", gap: 11 },
+  searchCard: { width: "48%", height: 244, overflow: "hidden", borderRadius: 18, backgroundColor: C.surface },
+  searchCardImage: { width: "100%", height: "100%", backgroundColor: C.surface2 },
+  searchCardInfo: { position: "absolute", left: 11, right: 10, bottom: 11 },
   searchRow: {
     minHeight: 86,
     backgroundColor: C.surface,
@@ -1909,6 +1969,8 @@ const styles = StyleSheet.create({
     backgroundColor: C.surface,
     marginBottom: 37,
   },
+  creditsCard: { padding: 15, borderRadius: 17, backgroundColor: C.surface, borderWidth: 1, borderColor: C.line, marginTop: -8 },
+  creditsText: { color: C.muted, fontSize: 10, lineHeight: 15, marginTop: 7 },
   tasteTitle: {
     color: C.ivory,
     fontSize: 29,
@@ -1955,7 +2017,7 @@ const styles = StyleSheet.create({
   },
   overlay: {
     ...StyleSheet.absoluteFill,
-    zIndex: 20,
+    zIndex: 30,
     backgroundColor: "rgba(0,0,0,.62)",
     justifyContent: "flex-end",
   },
@@ -2239,6 +2301,8 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: C.surface,
   },
+  deckPreviewButton: { position: "absolute", right: 18, top: 18, zIndex: 3, height: 34, paddingHorizontal: 10, borderRadius: 17, backgroundColor: "rgba(8,13,12,.75)", flexDirection: "row", alignItems: "center", gap: 5 },
+  deckPreviewText: { color: C.ivory, fontSize: 9, fontWeight: "900", letterSpacing: 0.9 },
   deckImage: { width: "100%", height: "100%" },
   swipeStamp: {
     position: "absolute",
