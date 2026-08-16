@@ -23,6 +23,7 @@ import {
 } from "react-native";
 import type { MediaItem as Media, MediaKind as Kind } from "./src/types/media";
 import { getBookRecommendations, getTitleDetails, getTrendingMedia, searchMedia } from "./src/services/media";
+import { disableDailyReccoReminder, enableDailyReccoReminder, getReminderEnabled } from "./src/services/reminders";
 import {
   ensureGuestSession,
   loadEpisodeReviews,
@@ -148,6 +149,7 @@ function ReccoApp() {
   const [curating, setCurating] = useState(false);
   const [tasteWeights, setTasteWeights] = useState<Record<string, number>>({});
   const [libraryFilter, setLibraryFilter] = useState<"ALL" | "SAVED" | "TRACKING" | "FINISHED">("ALL");
+  const [reminderEnabled, setReminderEnabled] = useState(false);
   const buzz = () =>
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
       () => undefined,
@@ -254,6 +256,9 @@ function ReccoApp() {
       })
       .catch(() => setCatalogError(true))
       .finally(() => setCatalogLoading(false));
+  }, []);
+  useEffect(() => {
+    void getReminderEnabled().then(setReminderEnabled).catch(() => undefined);
   }, []);
   useEffect(() => {
     AsyncStorage.getItem("recco-library-v1")
@@ -729,6 +734,24 @@ function ReccoApp() {
           </Tap>
         ))}
       </ScrollView>
+      <Text style={styles.smartShelfLabel}>SMART SHELVES</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.smartShelfRail}>
+        <Tap onPress={() => setLibraryFilter("TRACKING")} style={styles.smartShelf}>
+          <Ionicons name="play-circle-outline" size={20} color={C.teal} />
+          <Text style={styles.smartShelfTitle}>Continue</Text>
+          <Text style={styles.smartShelfMeta}>{trackingItems.length} in progress</Text>
+        </Tap>
+        <Tap onPress={() => setLibraryFilter("FINISHED")} style={styles.smartShelf}>
+          <Ionicons name="checkmark-done-outline" size={20} color={kindAccent.BOOK} />
+          <Text style={styles.smartShelfTitle}>Finished</Text>
+          <Text style={styles.smartShelfMeta}>{completed.length} completed</Text>
+        </Tap>
+        <Tap onPress={() => setLibraryFilter("SAVED")} style={styles.smartShelf}>
+          <Ionicons name="bookmark-outline" size={20} color={kindAccent.SHOW} />
+          <Text style={styles.smartShelfTitle}>For later</Text>
+          <Text style={styles.smartShelfMeta}>{saved.length} waiting</Text>
+        </Tap>
+      </ScrollView>
       <Section title="On your shelves">
         <View style={styles.libraryGrid}>
         {shelfItems.map((item) => (
@@ -809,6 +832,22 @@ function ReccoApp() {
           <Stat value={String(saved.length)} label="SAVED" />
           <Stat value={String(Object.values(episodeProgress).filter(Boolean).length)} label="EPISODES" />
         </View>
+      </Section>
+      <Section title="Gentle reminders">
+        <Tap onPress={() => {
+          if (reminderEnabled) {
+            void disableDailyReccoReminder().then(() => setReminderEnabled(false));
+            return;
+          }
+          void enableDailyReccoReminder().then((enabled) => setReminderEnabled(enabled));
+        }} style={[styles.reminderCard, reminderEnabled && styles.reminderCardActive]}>
+          <View style={[styles.reminderIcon, reminderEnabled && styles.reminderIconActive]}><Ionicons name="notifications-outline" size={20} color={reminderEnabled ? C.ink : C.teal} /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.reminderTitle}>Your daily Recco</Text>
+            <Text style={styles.reminderText}>{reminderEnabled ? "On · every day at 20:00" : "A gentle 20:00 reminder to return to your stories."}</Text>
+          </View>
+          <View style={[styles.reminderSwitch, reminderEnabled && styles.reminderSwitchActive]}><View style={[styles.reminderKnob, reminderEnabled && styles.reminderKnobActive]} /></View>
+        </Tap>
       </Section>
       <View style={styles.creditsCard}>
         <Text style={styles.heroEyebrow}>DATA & CREDITS</Text>
@@ -2044,6 +2083,11 @@ const styles = StyleSheet.create({
     marginBottom: 36,
   },
   libraryFilters: { gap: 8, paddingBottom: 22 },
+  smartShelfLabel: { color: C.muted, fontSize: 9, letterSpacing: 1.2, fontWeight: "900", marginBottom: 10 },
+  smartShelfRail: { gap: 9, paddingBottom: 27, paddingRight: 20 },
+  smartShelf: { width: 126, minHeight: 103, padding: 13, borderRadius: 17, backgroundColor: C.surface, borderWidth: 1, borderColor: C.line },
+  smartShelfTitle: { color: C.ivory, fontSize: 13, fontWeight: "900", marginTop: 11 },
+  smartShelfMeta: { color: C.muted, fontSize: 10, marginTop: 3 },
   libraryFilter: {
     borderWidth: 1,
     borderColor: C.line,
@@ -2125,6 +2169,16 @@ const styles = StyleSheet.create({
   },
   creditsCard: { padding: 15, borderRadius: 17, backgroundColor: C.surface, borderWidth: 1, borderColor: C.line, marginTop: -8 },
   creditsText: { color: C.muted, fontSize: 10, lineHeight: 15, marginTop: 7 },
+  reminderCard: { minHeight: 78, padding: 13, borderRadius: 17, backgroundColor: C.surface, borderWidth: 1, borderColor: C.line, flexDirection: "row", alignItems: "center", gap: 11 },
+  reminderCardActive: { borderColor: "#236256", backgroundColor: "#12322D" },
+  reminderIcon: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: C.surface2 },
+  reminderIconActive: { backgroundColor: C.teal },
+  reminderTitle: { color: C.ivory, fontSize: 13, fontWeight: "900" },
+  reminderText: { color: C.muted, fontSize: 10, lineHeight: 14, marginTop: 3 },
+  reminderSwitch: { width: 38, height: 23, borderRadius: 12, padding: 3, backgroundColor: C.line },
+  reminderSwitchActive: { backgroundColor: C.teal },
+  reminderKnob: { width: 17, height: 17, borderRadius: 9, backgroundColor: C.ivory },
+  reminderKnobActive: { alignSelf: "flex-end", backgroundColor: C.ink },
   tasteTitle: {
     color: C.ivory,
     fontSize: 29,
