@@ -26,10 +26,12 @@ import { getBookRecommendations, getTitleDetails, getTrendingMedia, searchMedia 
 import {
   ensureGuestSession,
   loadEpisodeReviews,
+  loadMediaReview,
   loadMediaStates,
   loadSwipeHistory,
   loadTasteProfile,
   saveEpisodeReview,
+  saveMediaReview,
   syncMediaState,
   syncSwipeAction,
   type TasteAction,
@@ -43,6 +45,25 @@ const kindIcon: Record<Kind, keyof typeof Ionicons.glyphMap> = {
   BOOK: "book-outline",
   ALBUM: "musical-notes-outline",
 };
+const kindName: Record<Kind, string> = {
+  FILM: "Film",
+  SHOW: "Series",
+  BOOK: "Book",
+  ALBUM: "Album",
+};
+const kindAccent: Record<Kind, string> = {
+  FILM: "#51D4F4",
+  SHOW: "#B9A4FF",
+  BOOK: "#FF9B70",
+  ALBUM: "#73E0A8",
+};
+const tasteVibes = ["Escapist", "Intense", "Comfort", "Cerebral", "Tender"];
+
+function shortTitle(title: string, limit = 27) {
+  if (title.length <= limit) return title;
+  const trimmed = title.slice(0, limit - 1).replace(/\s+\S*$/, "");
+  return `${trimmed || title.slice(0, limit - 1)}…`;
+}
 
 function Tap({
   children,
@@ -148,6 +169,10 @@ function ReccoApp() {
       );
   };
   const liveCatalog = [...trending, ...books];
+  const swipeItems = useMemo(
+    () => trending.flatMap((entry, index) => books[index] ? [entry, books[index]] : [entry]),
+    [trending, books],
+  );
   const allShelfItems = Object.values(libraryItems).filter(
     (item) => saved.includes(item.id) || tracked.includes(item.id),
   );
@@ -187,12 +212,14 @@ function ReccoApp() {
         if (!states.length) return getBookRecommendations(bookQueryFromTaste(taste));
         setLibraryItems(Object.fromEntries(states.map((state) => [state.media_id, {
           id: state.media_id,
-          kind: state.media_kind,
-          title: state.title,
-          by: state.media_kind === "SHOW" ? "TV series" : "Film",
-          year: "",
-          image: state.image_url ?? "",
-          note: "",
+          kind: state.metadata.kind ?? state.media_kind,
+          title: state.metadata.title ?? state.title,
+          by: state.metadata.by ?? (state.media_kind === "SHOW" ? "TV series" : state.media_kind === "BOOK" ? "Book" : "Film"),
+          year: state.metadata.year ?? "",
+          image: state.metadata.image ?? state.image_url ?? "",
+          note: state.metadata.note ?? "",
+          score: state.metadata.score,
+          genres: state.metadata.genres,
         }])));
         setSaved(states.filter((state) => state.status === "SAVED").map((state) => state.media_id));
         setTracked(states.filter((state) => state.status === "IN_PROGRESS").map((state) => state.media_id));
@@ -327,12 +354,15 @@ function ReccoApp() {
         style={styles.posterShade}
       />
       <View style={styles.posterInfo}>
-        <Text style={styles.mediaKind}>{item.kind}</Text>
+        <View style={styles.kindBadge}>
+          <Ionicons name={kindIcon[item.kind]} size={10} color={kindAccent[item.kind]} />
+          <Text style={[styles.mediaKind, { color: kindAccent[item.kind] }]}>{kindName[item.kind]}</Text>
+        </View>
         <Text
           numberOfLines={1}
           style={wide ? styles.wideTitle : styles.posterTitle}
         >
-          {item.title}
+          {shortTitle(item.title, wide ? 34 : 21)}
         </Text>
         {wide && (
           <Text style={styles.wideMeta}>
@@ -381,7 +411,7 @@ function ReccoApp() {
           </View>
         </View>
         <View style={styles.heroBottom}>
-          <Text style={styles.heroTitle}>{heroItem.title}</Text>
+          <Text numberOfLines={2} style={styles.heroTitle}>{shortTitle(heroItem.title, 42)}</Text>
           <Text style={styles.heroBody}>
             {heroItem.note || "Trending now on TMDB."}
           </Text>
@@ -408,7 +438,7 @@ function ReccoApp() {
               <View key={item.id}>
                 <Poster item={item} />
                 <Text numberOfLines={1} style={styles.railTitle}>
-                  {item.title}
+                  {shortTitle(item.title, 23)}
                 </Text>
                 <Text style={styles.railMeta}>{item.by}</Text>
                 <View style={styles.progress}>
@@ -444,7 +474,7 @@ function ReccoApp() {
               <View key={item.id}>
                 <Poster item={item} />
                 <Text numberOfLines={1} style={styles.railTitle}>
-                  {item.title}
+                  {shortTitle(item.title, 23)}
                 </Text>
                 <Text numberOfLines={1} style={styles.railMeta}>
                   {item.by}
@@ -575,7 +605,7 @@ function ReccoApp() {
             <Image source={{ uri: item.image }} style={styles.searchImage} />
             <View style={{ flex: 1 }}>
               <Text style={styles.mediaKind}>{item.kind}</Text>
-              <Text style={styles.searchTitle}>{item.title}</Text>
+              <Text numberOfLines={2} style={styles.searchTitle}>{shortTitle(item.title, 36)}</Text>
               <Text style={styles.searchMeta}>
                 {item.by} · {item.year}
               </Text>
@@ -635,14 +665,12 @@ function ReccoApp() {
                 style={styles.posterShade}
               />
               <View style={styles.libraryCardTop}>
-                <Text style={styles.mediaKind}>
-                  {tracked.includes(item.id)
-                    ? "IN PROGRESS"
-                    : "SAVED FOR LATER"}
+                <Text style={[styles.mediaKind, { color: kindAccent[item.kind] }]}>
+                  {kindName[item.kind].toUpperCase()} · {tracked.includes(item.id) ? "IN PROGRESS" : "SAVED"}
                 </Text>
               </View>
               <View style={styles.libraryCardInfo}>
-                <Text numberOfLines={2} style={styles.libraryCardTitle}>{item.title}</Text>
+                <Text numberOfLines={2} style={styles.libraryCardTitle}>{shortTitle(item.title, 32)}</Text>
                 <Text numberOfLines={1} style={styles.libraryCardMeta}>
                   {item.kind === "SHOW" ? "Series" : "Film"} · {item.year || item.by}
                 </Text>
@@ -762,9 +790,9 @@ function ReccoApp() {
         )}
         {curating && (
           <SwipeDeck
-            items={trending}
+            items={swipeItems}
             onClose={() => setCurating(false)}
-            onSignal={(item, action) => {
+            onSignal={(item, action, vibes) => {
               buzz();
               if (action === "LOVE" || action === "SAVE") {
                 setSaved((items) => items.includes(item.id) ? items : [...items, item.id]);
@@ -775,9 +803,10 @@ function ReccoApp() {
               setTasteWeights((current) => {
                 const next = { ...current, [`kind:${item.kind}`]: (current[`kind:${item.kind}`] ?? 0) + signal };
                 item.genres?.forEach((genre) => { next[genre] = (next[genre] ?? 0) + signal; });
+                vibes.forEach((vibe) => { next[`vibe:${vibe}`] = (next[`vibe:${vibe}`] ?? 0) + signal; });
                 return next;
               });
-              void syncSwipeAction(item, action).catch(() => undefined);
+              void syncSwipeAction(item, action, vibes).catch(() => undefined);
             }}
           />
         )}
@@ -861,12 +890,13 @@ function SwipeDeck({
 }: {
   items: Media[];
   onClose: () => void;
-  onSignal: (item: Media, action: TasteAction) => void;
+  onSignal: (item: Media, action: TasteAction, vibes: string[]) => void;
 }) {
   const [index, setIndex] = useState(0);
   const [queue, setQueue] = useState<Media[]>(items);
   const [loadingMore, setLoadingMore] = useState(true);
   const [deckError, setDeckError] = useState(false);
+  const [selectedVibes, setSelectedVibes] = useState<string[]>([]);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const card = useRef(new Animated.ValueXY()).current;
   const seenIds = useRef(new Set<string>());
@@ -926,12 +956,13 @@ function SwipeDeck({
       duration: 180,
       useNativeDriver: true,
     }).start(() => {
-      onSignal(item, action);
+      onSignal(item, action, selectedVibes);
       seenIds.current.add(item.id);
       // The old card is already off screen. Resetting it before state changes
       // prevents a one-frame flash of the next title in the centre.
       card.setValue({ x: 0, y: 0 });
       setIndex((value) => value + 1);
+      setSelectedVibes([]);
       swipeInFlight.current = false;
     });
   };
@@ -954,7 +985,7 @@ function SwipeDeck({
                   bounciness: 7,
                 }).start(),
       }),
-    [item?.id],
+    [item?.id, selectedVibes],
   );
   const tilt = card.x.interpolate({
     inputRange: [-250, 0, 250],
@@ -1021,8 +1052,8 @@ function SwipeDeck({
           </Text>
         </View>
       </View>
-      <Text style={styles.swipeTitle}>Build your{`\n`}taste profile.</Text>
-      <Text style={styles.swipeHint}>{loadingMore ? "Finding more titles…" : "Right to save · left to pass"}</Text>
+      <Text style={styles.swipeTitle}>Teach Recco{`\n`}the feeling.</Text>
+      <Text style={styles.swipeHint}>{loadingMore ? "Finding fresh titles…" : "Choose a feeling first, then react. Every signal has a different weight."}</Text>
       <View style={[styles.deck, { height: deckHeight }]}>
         {third && <View style={[styles.nextDeckCard, styles.thirdDeckCard]} />}
         <View style={styles.nextDeckCard}>
@@ -1034,8 +1065,8 @@ function SwipeDeck({
                 style={styles.posterShade}
               />
               <View style={styles.nextDeckInfo}>
-                <Text style={styles.mediaKind}>{next.kind}</Text>
-                <Text numberOfLines={2} style={styles.nextDeckTitle}>{next.title}</Text>
+                <Text style={[styles.mediaKind, { color: kindAccent[next.kind] }]}>{kindName[next.kind]}</Text>
+                <Text numberOfLines={2} style={styles.nextDeckTitle}>{shortTitle(next.title, 38)}</Text>
                 <Text numberOfLines={1} style={styles.nextDeckMeta}>
                   {next.score ? `★ ${next.score.toFixed(1)} · ` : ""}{next.kind === "SHOW" ? "Series" : "Film"} · {next.year}
                 </Text>
@@ -1068,7 +1099,7 @@ function SwipeDeck({
               { opacity: saveOpacity },
             ]}
           >
-            <Text style={styles.saveStampText}>KEEP</Text>
+            <Text style={styles.saveStampText}>QUEUE</Text>
           </Animated.View>
           <Animated.View
             style={[
@@ -1080,8 +1111,8 @@ function SwipeDeck({
             <Text style={styles.passStampText}>PASS</Text>
           </Animated.View>
           <View style={styles.deckInfo}>
-            <Text style={styles.mediaKind}>{item.kind}</Text>
-            <Text style={styles.deckTitle}>{item.title}</Text>
+            <Text style={[styles.mediaKind, { color: kindAccent[item.kind] }]}>{kindName[item.kind]}</Text>
+            <Text numberOfLines={2} style={styles.deckTitle}>{shortTitle(item.title, 42)}</Text>
             <View style={styles.deckFacts}>
               {item.score ? <Text style={styles.deckScore}>★ {item.score.toFixed(1)}</Text> : null}
               <Text style={styles.deckMeta}>{item.kind === "SHOW" ? "Series" : "Film"}</Text>
@@ -1090,36 +1121,56 @@ function SwipeDeck({
               {item.by} · {item.year}
             </Text>
             {!!item.genres?.length && (
-              <Text numberOfLines={1} style={styles.deckGenres}>{item.genres.slice(0, 3).join(" · ")}</Text>
+              <Text numberOfLines={1} style={styles.deckGenres}>Because you lean toward {item.genres.slice(0, 3).join(" · ")}</Text>
             )}
             <Text style={styles.deckNote}>{item.note}</Text>
           </View>
         </Animated.View>
+      </View>
+      <View style={styles.vibePanel}>
+        <View style={styles.vibePanelTop}>
+          <Text style={styles.vibePrompt}>WHAT FEELING ARE YOU AFTER?</Text>
+          <Text style={styles.vibeCount}>{selectedVibes.length ? `${selectedVibes.length} selected` : "Optional"}</Text>
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.vibeRail}>
+          {tasteVibes.map((vibe) => {
+            const active = selectedVibes.includes(vibe);
+            return (
+              <Tap
+                key={vibe}
+                onPress={() => setSelectedVibes((current) => active ? current.filter((entry) => entry !== vibe) : current.length >= 2 ? [...current.slice(1), vibe] : [...current, vibe])}
+                style={[styles.vibeChip, active && styles.vibeChipActive]}
+              >
+                <Text style={[styles.vibeChipText, active && styles.vibeChipTextActive]}>{vibe}</Text>
+              </Tap>
+            );
+          })}
+        </ScrollView>
       </View>
       <View style={styles.swipeActions}>
         <View style={styles.signalAction}>
           <Tap onPress={() => advance("NOT_FOR_ME")} style={styles.notForMeAction}>
             <Ionicons name="close" size={23} color="#E9917A" />
           </Tap>
-          <Text style={styles.signalLabel}>Nope</Text>
+          <Text style={styles.signalLabel}>Not me</Text>
         </View>
         <View style={styles.signalAction}>
           <Tap onPress={() => advance("PASS")} style={styles.passAction}>
             <Ionicons name="arrow-back" size={20} color={C.ivory} />
           </Tap>
-          <Text style={styles.signalLabel}>Pass</Text>
+          <Text style={styles.signalLabel}>Not now</Text>
         </View>
         <View style={styles.signalAction}>
           <Tap onPress={() => advance("SAVE")} style={styles.keepAction}>
             <Ionicons name="bookmark" size={20} color={C.ink} />
           </Tap>
-          <Text style={styles.signalLabel}>Save</Text>
+          <Text style={styles.signalLabel}>Queue it</Text>
         </View>
         <View style={styles.signalAction}>
           <Tap onPress={() => advance("LOVE")} style={styles.loveAction}>
             <Ionicons name="heart" size={21} color={C.ink} />
           </Tap>
-          <Text style={styles.signalLabel}>Love</Text>
+          <Text style={styles.signalLabel}>This is it</Text>
         </View>
       </View>
     </View>
@@ -1156,6 +1207,8 @@ function Detail({
   const [reviewing, setReviewing] = useState<{ number: number; title: string } | null>(null);
   const [reviewBody, setReviewBody] = useState("");
   const [reviewRating, setReviewRating] = useState(0);
+  const [titleReviewBody, setTitleReviewBody] = useState("");
+  const [titleReviewSaved, setTitleReviewSaved] = useState(false);
   useEffect(() => {
     let active = true;
     setLoadingDetails(item.id.startsWith("tmdb-"));
@@ -1181,6 +1234,18 @@ function Detail({
       active = false;
     };
   }, [item.id, item.kind, selectedSeason]);
+  useEffect(() => {
+    let active = true;
+    setTitleReviewSaved(false);
+    loadMediaReview(item.id)
+      .then((review) => {
+        if (active) setTitleReviewBody(review?.body ?? "");
+      })
+      .catch(() => active && setTitleReviewBody(""));
+    return () => {
+      active = false;
+    };
+  }, [item.id]);
   const watchedEpisodes = episodes.filter((episode) => episodeProgress[episode.id]).length;
   const description = details?.overview || item.note || "Save it now and pick it up when the moment is right.";
   return (
@@ -1198,7 +1263,7 @@ function Detail({
             <Image source={{ uri: item.image }} style={styles.detailPoster} />
             <View style={{ flex: 1 }}>
               <Text style={styles.mediaKind}>{item.kind}</Text>
-              <Text style={styles.detailTitle}>{item.title}</Text>
+              <Text numberOfLines={2} style={styles.detailTitle}>{shortTitle(item.title, 48)}</Text>
               <Text style={styles.detailMeta}>
                 {item.by} · {item.year}
               </Text>
@@ -1245,7 +1310,7 @@ function Detail({
                   <Tap onPress={() => onEpisodeToggle(episode.id)} style={styles.episode}>
                     <Text style={styles.episodeNum}>{episode.number}</Text>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.episodeTitle}>{episode.title}</Text>
+                      <Text numberOfLines={2} style={styles.episodeTitle}>{shortTitle(episode.title, 42)}</Text>
                       <Text style={styles.episodeMeta}>
                         {typeof episode.runtime === "number" ? `${episode.runtime} min` : episode.runtime}
                       </Text>
@@ -1316,6 +1381,40 @@ function Detail({
           {loadingDetails && item.kind === "SHOW" && (
             <Text style={styles.loadingText}>LOADING EPISODES…</Text>
           )}
+          <View style={styles.titleReviewCard}>
+            <View style={styles.titleReviewTop}>
+              <View>
+                <Text style={[styles.mediaKind, { color: kindAccent[item.kind] }]}>YOUR TAKE ON THIS {kindName[item.kind].toUpperCase()}</Text>
+                <Text style={styles.titleReviewTitle}>Leave a private note</Text>
+              </View>
+              <Ionicons name="chatbubble-ellipses-outline" size={20} color={kindAccent[item.kind]} />
+            </View>
+            <TextInput
+              value={titleReviewBody}
+              onChangeText={(value) => {
+                setTitleReviewBody(value);
+                setTitleReviewSaved(false);
+              }}
+              placeholder={`What did ${shortTitle(item.title, 26)} make you feel?`}
+              placeholderTextColor={C.muted}
+              multiline
+              maxLength={4000}
+              style={styles.titleReviewInput}
+            />
+            <View style={styles.titleReviewFooter}>
+              <Text style={styles.noteHelper}>{titleReviewSaved ? "Saved to your private archive" : "Only you can see this"}</Text>
+              <Tap
+                onPress={() => {
+                  void saveMediaReview({ media_id: item.id, body: titleReviewBody.trim(), rating: rating || null })
+                    .then(() => setTitleReviewSaved(true))
+                    .catch(() => undefined);
+                }}
+                style={styles.titleReviewSave}
+              >
+                <Text style={styles.primaryText}>Save note</Text>
+              </Tap>
+            </View>
+          </View>
           <Text style={styles.detailLabel}>YOUR RATING</Text>
           <View style={styles.stars}>
             {[1, 2, 3, 4, 5].map((star) => (
@@ -1573,6 +1672,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.1,
     fontWeight: "900",
   },
+  kindBadge: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start" },
   posterTitle: { color: "#FFF", fontSize: 13, fontWeight: "800", marginTop: 3 },
   railTitle: { color: C.ivory, fontSize: 14, fontWeight: "700", marginTop: 8 },
   railMeta: { color: C.muted, fontSize: 10, marginTop: 2 },
@@ -1961,6 +2061,13 @@ const styles = StyleSheet.create({
   reviewFooter: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 11 },
   reviewStars: { flexDirection: "row", gap: 5 },
   reviewSave: { backgroundColor: C.teal, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9 },
+  titleReviewCard: { marginTop: 23, padding: 14, borderRadius: 17, backgroundColor: C.surface2, borderWidth: 1, borderColor: C.line },
+  titleReviewTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  titleReviewTitle: { color: C.ivory, fontSize: 14, fontWeight: "800", marginTop: 4 },
+  titleReviewInput: { minHeight: 84, color: C.ivory, fontSize: 12, lineHeight: 18, textAlignVertical: "top", marginTop: 12, padding: 11, borderRadius: 11, backgroundColor: C.ink },
+  titleReviewFooter: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 11 },
+  noteHelper: { flex: 1, color: C.muted, fontSize: 10 },
+  titleReviewSave: { backgroundColor: C.teal, borderRadius: 10, paddingHorizontal: 13, paddingVertical: 9 },
   stars: { flexDirection: "row", gap: 12 },
   detailActions: { flexDirection: "row", gap: 9, marginTop: 21 },
   secondaryBtn: {
@@ -2177,6 +2284,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 22,
   },
+  vibePanel: { marginTop: 16 },
+  vibePanelTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
+  vibePrompt: { color: C.muted, fontSize: 9, fontWeight: "900", letterSpacing: 1.1 },
+  vibeCount: { color: C.teal, fontSize: 10, fontWeight: "800" },
+  vibeRail: { gap: 7, paddingRight: 20 },
+  vibeChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 14, borderWidth: 1, borderColor: C.line, backgroundColor: C.surface },
+  vibeChipActive: { backgroundColor: "rgba(68,221,193,.16)", borderColor: C.teal },
+  vibeChipText: { color: C.muted, fontSize: 10, fontWeight: "800" },
+  vibeChipTextActive: { color: C.teal },
   signalAction: { alignItems: "center", gap: 6 },
   signalLabel: { color: C.muted, fontSize: 9, fontWeight: "800" },
   passAction: {

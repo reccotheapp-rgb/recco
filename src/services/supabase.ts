@@ -46,6 +46,13 @@ export type StoredMediaState = {
   status: MediaStatus;
   rating: number | null;
   progress: Record<string, boolean>;
+  metadata: Partial<MediaItem>;
+};
+
+export type MediaReview = {
+  media_id: string;
+  body: string;
+  rating: number | null;
 };
 
 export type EpisodeReview = {
@@ -83,6 +90,16 @@ export async function syncMediaState(
       status,
       rating: options.rating,
       progress: options.progress ?? {},
+      metadata: {
+        kind: item.kind,
+        title: item.title,
+        by: item.by,
+        year: item.year,
+        image: item.image,
+        note: item.note,
+        score: item.score ?? null,
+        genres: item.genres ?? [],
+      },
       updated_at: new Date().toISOString(),
     });
   if (error) throw error;
@@ -93,19 +110,20 @@ export async function loadMediaStates(): Promise<StoredMediaState[]> {
   if (!supabase || !user) return [];
   const { data, error } = await supabase
     .from("media_states")
-    .select("media_id, media_kind, title, image_url, status, rating, progress")
+    .select("media_id, media_kind, title, image_url, status, rating, progress, metadata")
     .order("updated_at", { ascending: false });
   if (error) throw error;
   return (data ?? []) as StoredMediaState[];
 }
 
-export async function syncSwipeAction(item: MediaItem, action: TasteAction) {
+export async function syncSwipeAction(item: MediaItem, action: TasteAction, vibes: string[] = []) {
   const user = await ensureGuestSession();
   if (!supabase || !user) return;
   const metadata = {
     genres: item.genres ?? [],
     year: item.year,
     score: item.score ?? null,
+    vibes,
   };
   const { error } = await supabase.from("swipe_actions").upsert({
     user_id: user.id,
@@ -124,7 +142,7 @@ export async function syncSwipeAction(item: MediaItem, action: TasteAction) {
   if (profileError) throw profileError;
   const weights: Record<string, number> = { ...(profile?.feature_weights ?? {}) };
   const weight = actionWeights[action];
-  const features = [`kind:${item.kind}`, ...(item.genres ?? [])];
+  const features = [`kind:${item.kind}`, ...(item.genres ?? []), ...vibes.map((vibe) => `vibe:${vibe}`)];
   for (const feature of features) {
     weights[feature] = Math.max(-20, Math.min(20, (weights[feature] ?? 0) + weight));
   }
@@ -178,6 +196,29 @@ export async function saveEpisodeReview(review: EpisodeReview) {
   const user = await ensureGuestSession();
   if (!supabase || !user) return;
   const { error } = await supabase.from("episode_reviews").upsert({
+    ...review,
+    user_id: user.id,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+}
+
+export async function loadMediaReview(mediaId: string): Promise<MediaReview | null> {
+  const user = await ensureGuestSession();
+  if (!supabase || !user) return null;
+  const { data, error } = await supabase
+    .from("media_reviews")
+    .select("media_id, body, rating")
+    .eq("media_id", mediaId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data ?? null) as MediaReview | null;
+}
+
+export async function saveMediaReview(review: MediaReview) {
+  const user = await ensureGuestSession();
+  if (!supabase || !user) return;
+  const { error } = await supabase.from("media_reviews").upsert({
     ...review,
     user_id: user.id,
     updated_at: new Date().toISOString(),
