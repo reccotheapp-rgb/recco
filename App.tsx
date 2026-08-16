@@ -907,7 +907,7 @@ function SwipeDeck({
   const item = queue[index];
   const next = queue[index + 1];
   const third = queue[index + 2];
-  const deckHeight = Platform.OS === "web" ? 410 : Math.min(560, Math.max(390, viewportHeight * 0.56));
+  const deckHeight = Platform.OS === "web" ? 520 : Math.min(690, Math.max(470, viewportHeight * 0.68));
   useEffect(() => {
     seenIds.current = new Set();
     nextPage.current = items.length ? 2 : 1;
@@ -1052,11 +1052,13 @@ function SwipeDeck({
           </Text>
         </View>
       </View>
-      <Text style={styles.swipeTitle}>Teach Recco{`\n`}the feeling.</Text>
-      <Text style={styles.swipeHint}>{loadingMore ? "Finding fresh titles…" : "Choose a feeling first, then react. Every signal has a different weight."}</Text>
+      <View style={styles.swipeIntro}>
+        <Text style={styles.swipeIntroTitle}>Your next obsession.</Text>
+        <Text style={styles.swipeIntroHint}>{loadingMore ? "Updating your deck" : "Swipe to shape it"}</Text>
+      </View>
       <View style={[styles.deck, { height: deckHeight }]}>
         {third && <View style={[styles.nextDeckCard, styles.thirdDeckCard]} />}
-        <View style={styles.nextDeckCard}>
+        <View style={[styles.nextDeckCard, styles.peekDeckCard]}>
           {next && (
             <>
               <Image source={{ uri: next.image }} style={styles.deckImage} />
@@ -2182,8 +2184,8 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFill,
     zIndex: 24,
     backgroundColor: C.ink,
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === "web" ? 47 : 22,
+    paddingHorizontal: 12,
+    paddingTop: Platform.OS === "web" ? 24 : 10,
   },
   swipeHeader: {
     flexDirection: "row",
@@ -2191,9 +2193,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   swipeClose: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: C.surface,
@@ -2203,8 +2205,11 @@ const styles = StyleSheet.create({
     textAlign: "right",
     fontSize: 12,
     fontWeight: "800",
-    marginTop: 4,
+    marginTop: 2,
   },
+  swipeIntro: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", marginTop: 14, marginHorizontal: 7, marginBottom: 12 },
+  swipeIntroTitle: { color: C.ivory, fontSize: 18, letterSpacing: -0.4, fontWeight: "900" },
+  swipeIntroHint: { color: C.muted, fontSize: 10, fontWeight: "800" },
   swipeTitle: {
     color: C.ivory,
     fontSize: 37,
@@ -2214,22 +2219,23 @@ const styles = StyleSheet.create({
     marginTop: 18,
   },
   swipeHint: { color: C.muted, fontSize: 12, marginTop: 7, marginBottom: 19 },
-  deck: { position: "relative" },
+  deck: { position: "relative", marginHorizontal: 1 },
   nextDeckCard: {
     position: "absolute",
     inset: 0,
-    borderRadius: 25,
+    borderRadius: 30,
     overflow: "hidden",
     backgroundColor: C.surface2,
   },
-  thirdDeckCard: { transform: [{ scale: 0.95 }, { translateY: -11 }], opacity: 0.55 },
+  peekDeckCard: { transform: [{ scale: 0.975 }, { translateY: 13 }], opacity: 0.86 },
+  thirdDeckCard: { transform: [{ scale: 0.94 }, { translateY: 25 }], opacity: 0.5 },
   nextDeckInfo: { position: "absolute", left: 18, right: 18, bottom: 18 },
   nextDeckTitle: { color: "#FFF", fontSize: 26, lineHeight: 28, fontWeight: "900", letterSpacing: -0.8 },
   nextDeckMeta: { color: "#D2D8D4", fontSize: 12, marginTop: 5 },
   deckCard: {
     position: "absolute",
     inset: 0,
-    borderRadius: 25,
+    borderRadius: 30,
     overflow: "hidden",
     backgroundColor: C.surface,
   },
@@ -2264,11 +2270,11 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: 1.3,
   },
-  deckInfo: { position: "absolute", left: 18, right: 18, bottom: 18 },
+  deckInfo: { position: "absolute", left: 22, right: 22, bottom: 24 },
   deckTitle: {
     color: "#FFF",
-    fontSize: 29,
-    lineHeight: 31,
+    fontSize: 34,
+    lineHeight: 36,
     fontWeight: "900",
     letterSpacing: -1,
   },
@@ -2276,15 +2282,15 @@ const styles = StyleSheet.create({
   deckMeta: { color: "#D2D8D4", fontSize: 12 },
   deckGenres: { color: C.teal, fontSize: 10, fontWeight: "800", marginTop: 7 },
   deckScore: { color: C.teal, fontSize: 12, fontWeight: "900" },
-  deckNote: { color: "#B9C2BD", fontSize: 11, lineHeight: 15, marginTop: 10 },
+  deckNote: { color: "#B9C2BD", fontSize: 12, lineHeight: 17, marginTop: 10 },
   swipeActions: {
     flexDirection: "row",
     justifyContent: "center",
     gap: 14,
     alignItems: "center",
-    marginTop: 22,
+    marginTop: 14,
   },
-  vibePanel: { marginTop: 16 },
+  vibePanel: { marginTop: 14, marginHorizontal: 7 },
   vibePanelTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
   vibePrompt: { color: C.muted, fontSize: 9, fontWeight: "900", letterSpacing: 1.1 },
   vibeCount: { color: C.teal, fontSize: 10, fontWeight: "800" },
