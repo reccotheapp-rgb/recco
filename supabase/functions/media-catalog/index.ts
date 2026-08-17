@@ -345,7 +345,7 @@ async function personalizedRecommendations(userId: string, page: number, headers
   ]);
   const candidates = [...screen, ...books, ...games, ...albums] as Array<ReturnType<typeof mediaItem>>;
   const seen = new Set<string>();
-  return candidates
+  const ranked = candidates
     .filter((candidate) => !seen.has(candidate.id) && Boolean(seen.add(candidate.id)))
     .map((candidate, index) => {
       const genreScores = (candidate.genres ?? []).map((genre) => ({ genre, score: (weights[genre] ?? 0) + (weights[`genre:${genre}`] ?? 0) }));
@@ -366,6 +366,26 @@ async function personalizedRecommendations(userId: string, page: number, headers
     })
     .sort((left, right) => right._score - left._score)
     .map(({ _score, ...candidate }) => candidate);
+
+  // Keep the feed recognisably cross-media. Ranking decides the order within
+  // each format; round-robin delivery prevents one high-scoring source (such
+  // as games with review scores out of 100) taking over the whole first page.
+  const buckets = new Map<string, typeof ranked>();
+  for (const candidate of ranked) buckets.set(candidate.kind, [...(buckets.get(candidate.kind) ?? []), candidate]);
+  const kinds = [...new Set([favoriteKind, "FILM", "SHOW", "BOOK", "GAME", "ALBUM"].filter(Boolean))];
+  const mixed: typeof ranked = [];
+  while (mixed.length < ranked.length) {
+    let added = false;
+    for (const kind of kinds) {
+      const next = buckets.get(kind)?.shift();
+      if (next) {
+        mixed.push(next);
+        added = true;
+      }
+    }
+    if (!added) break;
+  }
+  return mixed;
 }
 
 Deno.serve(async (request) => {
