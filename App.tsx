@@ -44,6 +44,7 @@ import {
   saveEpisodeReview,
   saveMediaReview,
   requestAccountUpgrade,
+  requestAccountSignIn,
   setCollectionVisibility,
   type Collection,
   syncMediaState,
@@ -179,6 +180,8 @@ function ReccoApp() {
   const [account, setAccount] = useState<{ email: string | null; isAnonymous: boolean }>({ email: null, isAnonymous: true });
   const [accountEmailInput, setAccountEmailInput] = useState("");
   const [accountMessage, setAccountMessage] = useState("");
+  const [authMode, setAuthMode] = useState<"NONE" | "SIGN_IN">("NONE");
+  const [accountEpoch, setAccountEpoch] = useState(0);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [collectionDraft, setCollectionDraft] = useState("");
   const [collectionMessage, setCollectionMessage] = useState("");
@@ -284,7 +287,7 @@ function ReccoApp() {
       })
       .catch(() => setCatalogError(true))
       .finally(() => setCatalogLoading(false));
-  }, []);
+  }, [accountEpoch]);
   useEffect(() => {
     void loadCollections().then(setCollections).catch(() => undefined);
   }, []);
@@ -302,6 +305,8 @@ function ReccoApp() {
       void completeAccountRedirect(url).then((completed) => {
         if (completed) {
           refreshAccount();
+          setAccountEpoch((value) => value + 1);
+          setAuthMode("NONE");
           setAccountMessage("Your archive is now secured to this account.");
         }
       }).catch(() => setAccountMessage("That link could not be completed. Request a new one from Profile."));
@@ -870,6 +875,10 @@ function ReccoApp() {
           }} style={styles.accountButton}>
             <Text style={styles.primaryText}>Secure this archive</Text><Ionicons name="shield-checkmark-outline" size={17} color={C.ink} />
           </Tap>
+          <Tap onPress={() => setAuthMode("SIGN_IN")} style={styles.accountSignInButton}>
+            <Text style={styles.accountSignInText}>Already have a Recco account? Sign in</Text>
+            <Ionicons name="arrow-forward" size={15} color={C.teal} />
+          </Tap>
         </> : null}
         {!!accountMessage && <Text style={styles.accountMessage}>{accountMessage}</Text>}
       </View>
@@ -1032,12 +1041,16 @@ function ReccoApp() {
             }}
           />
         )}
-        {onboarding && <Onboarding onDone={(features) => {
+        {onboarding && <Onboarding onExistingAccount={() => setAuthMode("SIGN_IN")} onDone={(features) => {
           setOnboarding(false);
           void AsyncStorage.setItem("recco-onboarded-v2", "true");
           setTasteWeights((current) => features.reduce((next, feature) => ({ ...next, [feature]: (next[feature] ?? 0) + 2 }), { ...current }));
           void seedTasteProfile(features).catch(() => undefined);
         }} />}
+        {authMode === "SIGN_IN" && <AuthSheet
+          onClose={() => setAuthMode("NONE")}
+          onSend={requestAccountSignIn}
+        />}
         {sharedCollection && <SharedCollection collection={sharedCollection} onClose={() => setSharedCollection(null)} onOpen={open} />}
       </SafeAreaView>
     </View>
@@ -1769,11 +1782,43 @@ function SharedCollection({ collection, onClose, onOpen }: { collection: { title
     </View>
   </View>;
 }
-function Onboarding({ onDone }: { onDone: (features: string[]) => void }) {
+function AuthSheet({ onClose, onSend }: { onClose: () => void; onSend: (email: string) => Promise<void> }) {
+  const [email, setEmail] = useState("");
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const send = () => {
+    const address = email.trim();
+    if (!/^\S+@\S+\.\S+$/.test(address)) { setMessage("Enter a valid email address."); return; }
+    setSending(true);
+    setMessage("");
+    void onSend(address)
+      .then(() => setMessage("Check your inbox, then open the link on this phone."))
+      .catch(() => setMessage("We could not send that link. Try again shortly."))
+      .finally(() => setSending(false));
+  };
+  return <View style={styles.overlay}>
+    <View style={[styles.sheet, styles.authSheet]}>
+      <Tap onPress={onClose} style={styles.close}><Ionicons name="close" size={20} color={C.ivory} /></Tap>
+      <Text style={styles.heroEyebrow}>WELCOME BACK</Text>
+      <Text style={styles.authTitle}>Bring back your archive.</Text>
+      <Text style={styles.authText}>Enter the email you used to claim Recco. We’ll send a secure sign-in link — no password to remember.</Text>
+      <TextInput value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} autoFocus placeholder="you@email.com" placeholderTextColor={C.muted} style={styles.accountInput} />
+      <Tap onPress={send} style={[styles.accountButton, sending && styles.authButtonDisabled]}>
+        <Text style={styles.primaryText}>{sending ? "Sending…" : "Email me a sign-in link"}</Text>
+        <Ionicons name="mail-outline" size={17} color={C.ink} />
+      </Tap>
+      {!!message && <Text style={styles.accountMessage}>{message}</Text>}
+      <Text style={styles.authFine}>Your temporary guest archive stays on this phone until you confirm the link.</Text>
+    </View>
+  </View>;
+}
+
+function Onboarding({ onDone, onExistingAccount }: { onDone: (features: string[]) => void; onExistingAccount: () => void }) {
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<string[]>([]);
   const steps = [
-    { eyebrow: "STEP 1 OF 3 · YOUR WORLDS", title: "What do you reach for?", body: "Pick the feelings or genres you never get tired of.", options: ["Drama", "Mystery", "Fantasy", "Comedy", "Romance", "Science Fiction"] },
+    { eyebrow: "WELCOME TO RECCO", title: "A better next thing.", body: "One private place to discover, track and remember every story you care about.", options: [] },
+    { eyebrow: "STEP 1 OF 3 · YOUR WORLDS", title: "What do you reach for?", body: "Pick the genres you never get tired of.", options: ["Drama", "Mystery", "Fantasy", "Comedy", "Romance", "Science Fiction"] },
     { eyebrow: "STEP 2 OF 3 · YOUR ENERGY", title: "How should a story feel?", body: "These signals make the first Reccos feel personal.", options: ["Comfort", "Intense", "Escapist", "Cerebral", "Tender", "Unexpected"] },
     { eyebrow: "STEP 3 OF 3 · YOUR FORMATS", title: "Where should we start?", body: "You can add more worlds whenever you want.", options: ["kind:FILM", "kind:SHOW", "kind:BOOK", "kind:ALBUM", "kind:GAME"] },
   ];
@@ -1782,12 +1827,12 @@ function Onboarding({ onDone }: { onDone: (features: string[]) => void }) {
   const toggle = (value: string) => setAnswers((currentAnswers) => currentAnswers.includes(value) ? currentAnswers.filter((entry) => entry !== value) : [...currentAnswers, value]);
   return (
     <View style={styles.onboard}>
-      <View style={styles.onboardHeader}><Brand /><Text style={styles.onboardStep}>{step + 1}/3</Text></View>
+      <View style={styles.onboardHeader}><Brand /><Text style={styles.onboardStep}>{step === 0 ? "START" : `${step}/3`}</Text></View>
       <View style={styles.onboardArt}>
         <LinearGradient colors={["#1F5C53", "#16302C", "#0E1513"]} style={StyleSheet.absoluteFill} />
         <View style={styles.onboardOrbOne} /><View style={styles.onboardOrbTwo} />
         <View style={styles.onboardMark}><Image source={RECCO_MARK} style={styles.onboardMarkImage} /></View>
-        <Text style={styles.onboardArtText}>{step === 0 ? "Your taste,{`\n`}in motion." : step === 1 ? "Follow the{`\n`}feeling." : "Every format,{`\n`}one profile."}</Text>
+        <Text style={styles.onboardArtText}>{step === 0 ? "Your next,{`\n`}well chosen." : step === 1 ? "Your taste,{`\n`}in motion." : step === 2 ? "Follow the{`\n`}feeling." : "Every format,{`\n`}one profile."}</Text>
       </View>
       <View style={styles.onboardCopy}>
         <Text style={styles.heroEyebrow}>{current.eyebrow}</Text>
@@ -1801,10 +1846,10 @@ function Onboarding({ onDone }: { onDone: (features: string[]) => void }) {
         </View>
       </View>
       <Tap onPress={() => step < steps.length - 1 ? setStep((value) => value + 1) : onDone(answers)} style={styles.onboardButton}>
-        <Text style={styles.primaryText}>{step < steps.length - 1 ? "Continue" : "Build my Reccos"}</Text>
+        <Text style={styles.primaryText}>{step === 0 ? "Start shaping my taste" : step < steps.length - 1 ? "Continue" : "Build my Reccos"}</Text>
         <Ionicons name="arrow-forward" size={18} color={C.ink} />
       </Tap>
-      <Text style={styles.onboardFine}>Private by default. You can change these signals anytime.</Text>
+      {step === 0 ? <Tap onPress={onExistingAccount} style={styles.onboardExisting}><Text style={styles.onboardExistingText}>I already have a Recco account</Text></Tap> : <Text style={styles.onboardFine}>Private by default. You can change these signals anytime.</Text>}
     </View>
   );
 }
@@ -2295,7 +2340,14 @@ const styles = StyleSheet.create({
   accountText: { color: "#B7D3CB", fontSize: 11, lineHeight: 16, marginTop: 7 },
   accountInput: { height: 47, paddingHorizontal: 12, borderRadius: 12, color: C.ivory, backgroundColor: C.ink, marginTop: 14, fontSize: 13 },
   accountButton: { minHeight: 45, borderRadius: 13, backgroundColor: C.teal, marginTop: 9, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
+  accountSignInButton: { minHeight: 42, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, marginTop: 5 },
+  accountSignInText: { color: C.teal, fontSize: 11, fontWeight: "900" },
   accountMessage: { color: C.teal, fontSize: 10, lineHeight: 14, marginTop: 10 },
+  authSheet: { paddingTop: 29, paddingBottom: 28 },
+  authTitle: { color: C.ivory, fontSize: 28, lineHeight: 31, letterSpacing: -1, fontWeight: "900", marginTop: 8, paddingRight: 35 },
+  authText: { color: C.muted, fontSize: 13, lineHeight: 19, marginTop: 10 },
+  authFine: { color: C.muted, fontSize: 10, lineHeight: 14, marginTop: 13 },
+  authButtonDisabled: { opacity: 0.65 },
   tasteCard: {
     marginTop: 26,
     padding: 21,
@@ -2593,6 +2645,8 @@ const styles = StyleSheet.create({
     fontSize: 10,
     marginTop: 13,
   },
+  onboardExisting: { alignItems: "center", justifyContent: "center", minHeight: 36, marginTop: 4 },
+  onboardExistingText: { color: C.teal, fontSize: 12, fontWeight: "900" },
   curationCard: {
     backgroundColor: C.surface,
     borderRadius: 20,

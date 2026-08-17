@@ -49,6 +49,16 @@ export async function requestAccountUpgrade(email: string) {
   if (error) throw error;
 }
 
+/** Send a passwordless link to a previously claimed Recco account. */
+export async function requestAccountSignIn(email: string) {
+  if (!supabase) throw new Error("Recco is not configured.");
+  const { error } = await supabase.auth.signInWithOtp({
+    email: email.trim().toLowerCase(),
+    options: { emailRedirectTo: "recco://auth/callback" },
+  });
+  if (error) throw error;
+}
+
 export async function completeAccountRedirect(url: string) {
   if (!supabase || !url.startsWith("recco://auth/callback")) return false;
   const { error } = await supabase.auth.exchangeCodeForSession(url);
