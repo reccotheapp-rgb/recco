@@ -2,7 +2,7 @@
   "expo": {
     "name": "Recco",
     "slug": "recco",
-    "version": "0.3.2",
+    "version": "0.3.3",
     "orientation": "portrait",
     "icon": "./assets/recco-mark-v1.png",
     "description": "Your media life, all in one place.",
@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "com.reccotheapp.recco",
-      "versionCode": 11,
+      "versionCode": 12,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#0E1513",
