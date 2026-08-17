@@ -2,7 +2,11 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const TMDB = "https://api.themoviedb.org/3";
 const RAWG = "https://api.rawg.io/api";
+const MUSIC_BRAINZ = "https://musicbrainz.org/ws/2";
+const AUDIO_DB = "https://www.theaudiodb.com/api/v1/json/123";
 const UPSTREAM_TIMEOUT_MS = 10_000;
+const MUSIC_BRAINZ_MIN_INTERVAL_MS = 1_050;
+let lastMusicBrainzRequestAt = 0;
 const movieGenres: Record<number, string> = { 12: "Adventure", 14: "Fantasy", 16: "Animation", 18: "Drama", 27: "Horror", 28: "Action", 35: "Comedy", 36: "History", 37: "Western", 53: "Thriller", 80: "Crime", 99: "Documentary", 878: "Science Fiction", 9648: "Mystery", 10402: "Music", 10749: "Romance", 10751: "Family", 10752: "War" };
 const tvGenres: Record<number, string> = { 16: "Animation", 18: "Drama", 35: "Comedy", 37: "Western", 80: "Crime", 99: "Documentary", 9648: "Mystery", 10751: "Family", 10759: "Action & Adventure", 10762: "Kids", 10763: "News", 10764: "Reality", 10765: "Sci-Fi & Fantasy", 10766: "Soap", 10767: "Talk", 10768: "War & Politics" };
 const corsHeaders = {
@@ -13,6 +17,7 @@ const corsHeaders = {
 type TmdbItem = Record<string, unknown>;
 type GoogleBooksResponse = { items?: TmdbItem[] };
 type RawgResponse = { results?: TmdbItem[] };
+type MusicBrainzResponse = { "release-groups"?: TmdbItem[] };
 
 async function upstreamFetch(input: string | URL, init: RequestInit = {}) {
   try {
@@ -140,6 +145,77 @@ async function discoverGames() {
   return gamesRequest({ ordering: "-added", page_size: "20" });
 }
 
+async function musicBrainzFetch(endpoint: URL) {
+  const wait = Math.max(0, MUSIC_BRAINZ_MIN_INTERVAL_MS - (Date.now() - lastMusicBrainzRequestAt));
+  if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+  lastMusicBrainzRequestAt = Date.now();
+  return upstreamFetch(endpoint, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "Recco/0.3.2 (https://github.com/reccotheapp-rgb/recco)",
+    },
+  });
+}
+
+function albumItem(releaseGroup: TmdbItem) {
+  const credit = Array.isArray(releaseGroup["artist-credit"])
+    ? releaseGroup["artist-credit"].map((entry) => String((entry as TmdbItem).name ?? "")).filter(Boolean).join(", ")
+    : "Unknown artist";
+  const tags = Array.isArray(releaseGroup.tags)
+    ? releaseGroup.tags.map((entry) => String((entry as TmdbItem).name ?? "")).filter(Boolean).slice(0, 3)
+    : [];
+  const id = String(releaseGroup.id ?? "");
+  return {
+    id: `musicbrainz-album-${id}`,
+    kind: "ALBUM",
+    title: String(releaseGroup.title ?? "Untitled album"),
+    by: credit,
+    year: String(releaseGroup["first-release-date"] ?? "").slice(0, 4) || "—",
+    image: id ? `https://coverartarchive.org/release-group/${id}/front-500` : "",
+    note: tags.length ? `${tags.join(" · ")} album` : "Album",
+    genres: tags,
+  };
+}
+
+function audioDbAlbumItem(album: TmdbItem) {
+  const genres = String(album.strGenre ?? "").split(/[;,/]/).map((tag) => tag.trim()).filter(Boolean).slice(0, 3);
+  return {
+    id: `audiodb-album-${album.idAlbum}`,
+    kind: "ALBUM",
+    title: String(album.strAlbum ?? "Untitled album"),
+    by: String(album.strArtist ?? "Unknown artist"),
+    year: String(album.intYearReleased ?? "").slice(0, 4) || "—",
+    image: String(album.strAlbumThumb ?? ""),
+    note: genres.length ? `${genres.join(" · ")} album` : "Album",
+    genres,
+  };
+}
+
+async function searchAlbums(query: string, maxResults = 16) {
+  const endpoint = new URL(`${MUSIC_BRAINZ}/release-group`);
+  endpoint.searchParams.set("query", query);
+  endpoint.searchParams.set("limit", String(maxResults));
+  endpoint.searchParams.set("fmt", "json");
+  const response = await musicBrainzFetch(endpoint);
+  if (!response?.ok) return [];
+  const data = (await response.json()) as MusicBrainzResponse;
+  return (data["release-groups"] ?? [])
+    .filter((entry) => String(entry["primary-type"] ?? "") === "Album")
+    .map(albumItem);
+}
+
+async function discoverAlbums() {
+  const endpoint = new URL(`${AUDIO_DB}/trending.php`);
+  endpoint.searchParams.set("country", "us");
+  endpoint.searchParams.set("type", "itunes");
+  endpoint.searchParams.set("format", "albums");
+  const response = await upstreamFetch(endpoint);
+  if (!response?.ok) return [];
+  const data = (await response.json()) as TmdbItem;
+  const albums = Array.isArray(data.trending) ? data.trending : Array.isArray(data.album) ? data.album : [];
+  return albums.map((entry) => audioDbAlbumItem(entry as TmdbItem)).slice(0, 20);
+}
+
 async function requireUser(request: Request) {
   const auth = request.headers.get("Authorization");
   const keys = JSON.parse(Deno.env.get("SUPABASE_PUBLISHABLE_KEYS") ?? "{}");
@@ -164,6 +240,11 @@ Deno.serve(async (request) => {
     if (!games.length) return Response.json({ error: "Games are unavailable" }, { status: 502, headers: corsHeaders });
     return Response.json({ results: games }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
   }
+  if (action === "albums") {
+    const albums = await discoverAlbums();
+    if (!albums.length) return Response.json({ error: "Albums are unavailable" }, { status: 502, headers: corsHeaders });
+    return Response.json({ results: albums }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
+  }
 
   const token = Deno.env.get("TMDB_READ_ACCESS_TOKEN");
   if (!token) return Response.json({ error: "TMDB is not configured" }, { status: 503, headers: corsHeaders });
@@ -181,7 +262,7 @@ Deno.serve(async (request) => {
     const query = url.searchParams.get("q")?.trim();
     if (!query) return Response.json({ error: "A search query is required" }, { status: 400, headers: corsHeaders });
     const requestedKind = url.searchParams.get("kind") ?? "ALL";
-    if (!["ALL", "FILM", "SHOW", "BOOK", "GAME"].includes(requestedKind)) {
+    if (!["ALL", "FILM", "SHOW", "BOOK", "GAME", "ALBUM"].includes(requestedKind)) {
       return Response.json({ error: "An unsupported media type was requested" }, { status: 400, headers: corsHeaders });
     }
     if (requestedKind === "BOOK") {
@@ -191,6 +272,10 @@ Deno.serve(async (request) => {
     if (requestedKind === "GAME") {
       const games = await searchGames(query);
       return Response.json({ results: games }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
+    }
+    if (requestedKind === "ALBUM") {
+      const albums = await searchAlbums(query);
+      return Response.json({ results: albums }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
     }
     const endpoint = requestedKind === "FILM" ? "movie" : requestedKind === "SHOW" ? "tv" : "multi";
     const upstream = await upstreamFetch(`${TMDB}/search/${endpoint}?query=${encodeURIComponent(query)}&include_adult=false&language=en-US`, { headers });

@@ -24,7 +24,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import type { MediaItem as Media, MediaKind as Kind } from "./src/types/media";
-import { getBookRecommendations, getGameRecommendations, getTitleDetails, getTrendingMedia, searchMedia } from "./src/services/media";
+import { getAlbumRecommendations, getBookRecommendations, getGameRecommendations, getTitleDetails, getTrendingMedia, searchMedia } from "./src/services/media";
 import { disableDailyReccoReminder, enableDailyReccoReminder, getReminderEnabled } from "./src/services/reminders";
 import {
   ensureGuestSession,
@@ -151,12 +151,13 @@ function ReccoApp() {
   const [trackingMeta, setTrackingMeta] = useState<Record<string, TrackingMeta>>({});
   const [hydrated, setHydrated] = useState(false);
   const [query, setQuery] = useState("");
-  const [searchKind, setSearchKind] = useState<"FILM" | "SHOW" | "BOOK" | "GAME">("FILM");
+  const [searchKind, setSearchKind] = useState<"FILM" | "SHOW" | "BOOK" | "ALBUM" | "GAME">("FILM");
   const [filter, setFilter] = useState<"ALL" | Kind>("ALL");
   const [remoteResults, setRemoteResults] = useState<Media[]>([]);
   const [trending, setTrending] = useState<Media[]>([]);
   const [books, setBooks] = useState<Media[]>([]);
   const [games, setGames] = useState<Media[]>([]);
+  const [albums, setAlbums] = useState<Media[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -184,7 +185,7 @@ function ReccoApp() {
   const findItem = (id: string) =>
     selected?.id === id
       ? selected
-      : libraryItems[id] ?? trending.find((item) => item.id === id) ?? books.find((item) => item.id === id) ?? games.find((item) => item.id === id);
+      : libraryItems[id] ?? trending.find((item) => item.id === id) ?? books.find((item) => item.id === id) ?? games.find((item) => item.id === id) ?? albums.find((item) => item.id === id);
   const save = (id: string) => {
     buzz();
     setSaved((items) =>
@@ -206,10 +207,10 @@ function ReccoApp() {
         () => undefined,
       );
   };
-  const liveCatalog = [...trending, ...books, ...games];
+  const liveCatalog = [...trending, ...books, ...games, ...albums];
   const swipeItems = useMemo(
-    () => trending.flatMap((entry, index) => [entry, books[index], games[index]].filter(Boolean) as Media[]),
-    [trending, books, games],
+    () => trending.flatMap((entry, index) => [entry, books[index], games[index], albums[index]].filter(Boolean) as Media[]),
+    [trending, books, games, albums],
   );
   const allShelfItems = Object.values(libraryItems).filter(
     (item) => saved.includes(item.id) || tracked.includes(item.id) || completed.includes(item.id),
@@ -279,6 +280,7 @@ function ReccoApp() {
       .catch(() => setCatalogError(true))
       .finally(() => setCatalogLoading(false));
     void getGameRecommendations().then(setGames).catch(() => undefined);
+    void getAlbumRecommendations().then(setAlbums).catch(() => undefined);
   }, []);
   useEffect(() => {
     void loadCollections().then(setCollections).catch(() => undefined);
@@ -596,6 +598,27 @@ function ReccoApp() {
           </ScrollView>
         </Section>
       )}
+      {albums.length > 0 && (
+        <Section title="Albums for you">
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.rail}
+          >
+            {albums.slice(0, 6).map((item) => (
+              <View key={item.id}>
+                <Poster item={item} />
+                <Text numberOfLines={1} style={styles.railTitle}>
+                  {shortTitle(item.title, 23)}
+                </Text>
+                <Text numberOfLines={1} style={styles.railMeta}>
+                  {item.by}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+        </Section>
+      )}
       {games.length > 0 && (
         <Section title="Games for you">
           <ScrollView
@@ -655,7 +678,7 @@ function ReccoApp() {
           <Text style={styles.heroEyebrow}>TASTE CURATION</Text>
           <Text style={styles.curationTitle}>Teach Recco{`\n`}your taste.</Text>
           <Text style={styles.curationText}>
-            Swipe through real films and series. Every signal shapes your next book match too.
+            Swipe through real media. Every signal shapes your next film, book, album, or game match.
           </Text>
         </View>
         <View style={styles.curationIcon}>
@@ -668,7 +691,7 @@ function ReccoApp() {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.chips}
       >
-        {(["ALL", "FILM", "SHOW", "BOOK", "GAME"] as const).map((item) => (
+        {(["ALL", "FILM", "SHOW", "BOOK", "ALBUM", "GAME"] as const).map((item) => (
           <Tap
             key={item}
             onPress={() => setFilter(item)}
@@ -717,9 +740,9 @@ function ReccoApp() {
       contentContainerStyle={styles.scroll}
     >
       <Header label="SEARCH" />
-      <Text style={styles.display}>Find your{`\n`}{searchKind === "SHOW" ? "next series." : searchKind === "BOOK" ? "next book." : searchKind === "GAME" ? "next game." : "next film."}</Text>
+      <Text style={styles.display}>Find your{`\n`}{searchKind === "SHOW" ? "next series." : searchKind === "BOOK" ? "next book." : searchKind === "ALBUM" ? "next album." : searchKind === "GAME" ? "next game." : "next film."}</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.searchTypeRail}>
-        {(["FILM", "SHOW", "BOOK", "GAME"] as const).map((kind) => {
+        {(["FILM", "SHOW", "BOOK", "ALBUM", "GAME"] as const).map((kind) => {
           const active = searchKind === kind;
           return <Tap key={kind} onPress={() => setSearchKind(kind)} style={[styles.searchType, active && styles.searchTypeActive]}>
             <Ionicons name={kindIcon[kind]} size={15} color={active ? C.ink : kindAccent[kind]} />
@@ -963,7 +986,7 @@ function ReccoApp() {
       </Section>
       <View style={styles.creditsCard}>
         <Text style={styles.heroEyebrow}>DATA & CREDITS</Text>
-        <Text style={styles.creditsText}>This product uses the TMDB API but is not endorsed or certified by TMDB. Game data and images: RAWG.</Text>
+        <Text style={styles.creditsText}>This product uses the TMDB API but is not endorsed or certified by TMDB. Game data and images: RAWG. Music metadata: MusicBrainz, Cover Art Archive, and TheAudioDB.</Text>
       </View>
     </ScrollView>
   );
@@ -1812,7 +1835,7 @@ function Onboarding({ onDone }: { onDone: (features: string[]) => void }) {
   const steps = [
     { eyebrow: "STEP 1 OF 3 · YOUR WORLDS", title: "What do you reach for?", body: "Pick the feelings or genres you never get tired of.", options: ["Drama", "Mystery", "Fantasy", "Comedy", "Romance", "Science Fiction"] },
     { eyebrow: "STEP 2 OF 3 · YOUR ENERGY", title: "How should a story feel?", body: "These signals make the first Reccos feel personal.", options: ["Comfort", "Intense", "Escapist", "Cerebral", "Tender", "Unexpected"] },
-    { eyebrow: "STEP 3 OF 3 · YOUR FORMATS", title: "Where should we start?", body: "You can add more worlds whenever you want.", options: ["kind:FILM", "kind:SHOW", "kind:BOOK"] },
+    { eyebrow: "STEP 3 OF 3 · YOUR FORMATS", title: "Where should we start?", body: "You can add more worlds whenever you want.", options: ["kind:FILM", "kind:SHOW", "kind:BOOK", "kind:ALBUM", "kind:GAME"] },
   ];
   const current = steps[step];
   const label = (value: string) => value.startsWith("kind:") ? `${kindName[value.slice(5) as Kind]}s` : value;
