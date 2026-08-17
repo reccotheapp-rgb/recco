@@ -32,6 +32,7 @@ export async function getCatalogAccessToken() {
 }
 
 export type AccountState = { email: string | null; isAnonymous: boolean };
+export type Collection = { id: string; title: string; description: string; visibility: "PRIVATE" | "UNLISTED"; share_token: string; created_at: string; itemCount: number };
 
 export async function getAccountState(): Promise<AccountState> {
   const user = await ensureGuestSession();
@@ -53,6 +54,41 @@ export async function completeAccountRedirect(url: string) {
   const { error } = await supabase.auth.exchangeCodeForSession(url);
   if (error) throw error;
   return true;
+}
+
+export async function loadCollections(): Promise<Collection[]> {
+  const user = await ensureGuestSession();
+  if (!supabase || !user) return [];
+  const { data, error } = await supabase
+    .from("collections")
+    .select("id, title, description, visibility, share_token, created_at, collection_items(count)")
+    .order("updated_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((entry) => ({
+    ...(entry as Omit<Collection, "itemCount">),
+    itemCount: Number((entry.collection_items as { count?: number }[] | undefined)?.[0]?.count ?? 0),
+  }));
+}
+
+export async function createCollection(title: string, description = "") {
+  const user = await ensureGuestSession();
+  if (!supabase || !user) throw new Error("Recco could not start a secure session.");
+  const { data, error } = await supabase
+    .from("collections")
+    .insert({ user_id: user.id, title: title.trim(), description: description.trim() })
+    .select("id, title, description, visibility, share_token, created_at")
+    .single();
+  if (error) throw error;
+  return { ...(data as Omit<Collection, "itemCount">), itemCount: 0 } as Collection;
+}
+
+export async function addMediaToCollection(collectionId: string, mediaId: string) {
+  const user = await ensureGuestSession();
+  if (!supabase || !user) return;
+  const { error } = await supabase
+    .from("collection_items")
+    .upsert({ collection_id: collectionId, media_id: mediaId }, { onConflict: "collection_id,media_id", ignoreDuplicates: true });
+  if (error) throw error;
 }
 
 export type MediaStatus = "SAVED" | "IN_PROGRESS" | "COMPLETED" | "PAUSED" | "DROPPED";

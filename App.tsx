@@ -29,7 +29,10 @@ import { disableDailyReccoReminder, enableDailyReccoReminder, getReminderEnabled
 import {
   ensureGuestSession,
   completeAccountRedirect,
+  addMediaToCollection,
+  createCollection,
   getAccountState,
+  loadCollections,
   loadEpisodeReviews,
   loadMediaReview,
   loadMediaStates,
@@ -39,6 +42,7 @@ import {
   saveEpisodeReview,
   saveMediaReview,
   requestAccountUpgrade,
+  type Collection,
   syncMediaState,
   syncSwipeAction,
   type TasteAction,
@@ -158,6 +162,9 @@ function ReccoApp() {
   const [account, setAccount] = useState<{ email: string | null; isAnonymous: boolean }>({ email: null, isAnonymous: true });
   const [accountEmailInput, setAccountEmailInput] = useState("");
   const [accountMessage, setAccountMessage] = useState("");
+  const [collections, setCollections] = useState<Collection[]>([]);
+  const [collectionDraft, setCollectionDraft] = useState("");
+  const [collectionMessage, setCollectionMessage] = useState("");
   const buzz = () =>
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
       () => undefined,
@@ -264,6 +271,9 @@ function ReccoApp() {
       })
       .catch(() => setCatalogError(true))
       .finally(() => setCatalogLoading(false));
+  }, []);
+  useEffect(() => {
+    void loadCollections().then(setCollections).catch(() => undefined);
   }, []);
   useEffect(() => {
     void getReminderEnabled().then(setReminderEnabled).catch(() => undefined);
@@ -775,6 +785,28 @@ function ReccoApp() {
           <Text style={styles.smartShelfMeta}>{saved.length} waiting</Text>
         </Tap>
       </ScrollView>
+      <Section title="Your collections" action="PRIVATE BY DEFAULT">
+        <View style={styles.collectionCreateRow}>
+          <TextInput value={collectionDraft} onChangeText={setCollectionDraft} placeholder="Name a collection" placeholderTextColor={C.muted} maxLength={80} style={styles.collectionInput} />
+          <Tap onPress={() => {
+            const title = collectionDraft.trim();
+            if (!title) { setCollectionMessage("Give your collection a name first."); return; }
+            void createCollection(title).then((collection) => {
+              setCollections((current) => [collection, ...current]);
+              setCollectionDraft("");
+              setCollectionMessage("Private collection created.");
+            }).catch(() => setCollectionMessage("Could not create that collection. Try again."));
+          }} style={styles.collectionCreateButton}><Ionicons name="add" size={20} color={C.ink} /></Tap>
+        </View>
+        {!!collectionMessage && <Text style={styles.collectionMessage}>{collectionMessage}</Text>}
+        {collections.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.collectionRail}>
+          {collections.map((collection) => <Tap key={collection.id} onPress={() => void Share.share({ message: `My private Recco collection: ${collection.title}. ${collection.itemCount} title${collection.itemCount === 1 ? "" : "s"} saved so far.` }).catch(() => undefined)} style={styles.collectionCard}>
+            <View style={styles.collectionCardIcon}><Ionicons name="layers-outline" size={19} color={C.ink} /></View>
+            <Text numberOfLines={2} style={styles.collectionCardTitle}>{collection.title}</Text>
+            <Text style={styles.collectionCardMeta}>{collection.itemCount} titles · Private</Text>
+          </Tap>)}
+        </ScrollView> : <Text style={styles.collectionEmpty}>Create a private shelf for a mood, a person, or a future night in.</Text>}
+      </Section>
       <Section title="On your shelves">
         <View style={styles.libraryGrid}>
         {shelfItems.map((item) => (
@@ -947,6 +979,14 @@ function ReccoApp() {
               setSaved((items) => items.includes(selected.id) ? items : [...items, selected.id]);
               setLibraryItems((items) => ({ ...items, [selected.id]: selected }));
               void syncMediaState(selected, completed.includes(selected.id) ? "SAVED" : "COMPLETED", { rating: rating[selected.id], progress: episodeProgress, tracking: trackingMeta[selected.id] }).catch(() => undefined);
+            }}
+            collectionName={collections[0]?.title}
+            onAddToCollection={() => {
+              const collection = collections[0];
+              if (!collection) return;
+              void addMediaToCollection(collection.id, selected.id).then(() => {
+                setCollections((current) => current.map((entry) => entry.id === collection.id ? { ...entry, itemCount: entry.itemCount + 1 } : entry));
+              }).catch(() => undefined);
             }}
             onRate={(value) => {
               setRating((values) => ({ ...values, [selected.id]: value }));
@@ -1388,6 +1428,8 @@ function Detail({
   onSave,
   onTrack,
   onComplete,
+  collectionName,
+  onAddToCollection,
   onRate,
   onEpisodeToggle,
   onUpdateTracking,
@@ -1402,6 +1444,8 @@ function Detail({
   onSave: () => void;
   onTrack: () => void;
   onComplete: () => void;
+  collectionName?: string;
+  onAddToCollection: () => void;
   onRate: (value: number) => void;
   onEpisodeToggle: (id: string) => void;
   onUpdateTracking: (patch: TrackingMeta) => void;
@@ -1692,6 +1736,10 @@ function Detail({
           <Ionicons name="checkmark-circle-outline" size={17} color={C.teal} />
           <Text style={styles.completeText}>Mark as finished</Text>
         </Tap>
+        {collectionName && <Tap onPress={onAddToCollection} style={styles.addCollectionBtn}>
+          <Ionicons name="add-circle-outline" size={16} color={kindAccent[item.kind]} />
+          <Text style={[styles.addCollectionText, { color: kindAccent[item.kind] }]}>Add to {shortTitle(collectionName, 22)}</Text>
+        </Tap>}
         <Tap onPress={() => void Share.share({ message: `A Recco for you: ${item.title} (${item.year}). ${item.note || "Added from my personal media archive."}` }).catch(() => undefined)} style={styles.shareReccoBtn}>
           <Ionicons name="share-outline" size={16} color={C.muted} />
           <Text style={styles.shareReccoText}>Share this Recco</Text>
@@ -2132,6 +2180,16 @@ const styles = StyleSheet.create({
   smartShelf: { width: 126, minHeight: 103, padding: 13, borderRadius: 17, backgroundColor: C.surface, borderWidth: 1, borderColor: C.line },
   smartShelfTitle: { color: C.ivory, fontSize: 13, fontWeight: "900", marginTop: 11 },
   smartShelfMeta: { color: C.muted, fontSize: 10, marginTop: 3 },
+  collectionCreateRow: { height: 48, flexDirection: "row", gap: 8 },
+  collectionInput: { flex: 1, height: 48, paddingHorizontal: 13, borderRadius: 14, color: C.ivory, fontSize: 12, backgroundColor: C.surface, borderWidth: 1, borderColor: C.line },
+  collectionCreateButton: { width: 48, height: 48, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: C.teal },
+  collectionMessage: { color: C.teal, fontSize: 10, marginTop: 8 },
+  collectionRail: { gap: 10, paddingTop: 13, paddingRight: 20 },
+  collectionCard: { width: 158, minHeight: 116, borderRadius: 18, padding: 13, backgroundColor: C.surface, borderWidth: 1, borderColor: C.line },
+  collectionCardIcon: { width: 31, height: 31, borderRadius: 10, backgroundColor: C.teal, alignItems: "center", justifyContent: "center" },
+  collectionCardTitle: { color: C.ivory, fontSize: 14, lineHeight: 17, fontWeight: "900", marginTop: 11 },
+  collectionCardMeta: { color: C.muted, fontSize: 9, marginTop: 4 },
+  collectionEmpty: { color: C.muted, fontSize: 11, lineHeight: 16, marginTop: 13 },
   libraryFilter: {
     borderWidth: 1,
     borderColor: C.line,
@@ -2429,6 +2487,8 @@ const styles = StyleSheet.create({
   primaryText: { color: C.ink, fontSize: 12, fontWeight: "900" },
   completeBtn: { minHeight: 38, marginTop: 10, borderRadius: 12, flexDirection: "row", gap: 7, alignItems: "center", justifyContent: "center" },
   completeText: { color: C.teal, fontSize: 11, fontWeight: "900" },
+  addCollectionBtn: { minHeight: 35, flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center" },
+  addCollectionText: { fontSize: 10, fontWeight: "900" },
   shareReccoBtn: { minHeight: 35, flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center" },
   shareReccoText: { color: C.muted, fontSize: 10, fontWeight: "800" },
   onboard: {
