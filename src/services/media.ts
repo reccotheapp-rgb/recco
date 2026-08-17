@@ -5,7 +5,7 @@ import { getCatalogAccessToken } from "./supabase";
 type MediaSearchResponse = { results: MediaItem[] };
 
 async function mediaCatalog(
-  action: "discover" | "search" | "books" | "games" | "albums" | "details",
+  action: "discover" | "search" | "books" | "games" | "albums" | "recommendations" | "details",
   params: Record<string, string> = {},
 ) {
   const token = await getCatalogAccessToken();
@@ -67,6 +67,14 @@ export async function getGameRecommendations(): Promise<MediaItem[]> {
 
 export async function getAlbumRecommendations(): Promise<MediaItem[]> {
   return ((await mediaCatalog("albums")) as MediaSearchResponse).results;
+}
+
+/**
+ * A mixed, server-ranked feed. The ranking is based only on the caller's
+ * saved taste signals and contains a reason that can be shown to the user.
+ */
+export async function getPersonalizedRecommendations(page = 1): Promise<MediaItem[]> {
+  return ((await mediaCatalog("recommendations", { page: String(page) })) as MediaSearchResponse).results;
 }
 
 export async function getTitleDetails(

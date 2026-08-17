@@ -10,4 +10,6 @@ export type MediaItem = {
   note: string;
   score?: number;
   genres?: string[];
+  /** A short, transparent explanation returned by Recco's recommendation service. */
+  reason?: string;
 };

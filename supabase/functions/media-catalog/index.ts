@@ -271,6 +271,103 @@ async function hasCatalogQuota(userId: string) {
   return !error && data === true;
 }
 
+type SignalRow = {
+  action?: string;
+  media_kind?: string;
+  metadata?: { genres?: unknown; vibes?: unknown };
+};
+
+type StateRow = {
+  media_kind?: string;
+  status?: string;
+  rating?: number | null;
+  metadata?: { genres?: unknown };
+};
+
+function addWeight(weights: Record<string, number>, feature: string, amount: number) {
+  const key = feature.trim();
+  if (!key) return;
+  weights[key] = Math.max(-24, Math.min(24, (weights[key] ?? 0) + amount));
+}
+
+function metadataStrings(value: unknown) {
+  return Array.isArray(value) ? value.map(String).map((item) => item.trim()).filter(Boolean) : [];
+}
+
+function kindLabel(kind: string) {
+  return ({ FILM: "films", SHOW: "series", BOOK: "books", ALBUM: "albums", GAME: "games" } as Record<string, string>)[kind] ?? "stories";
+}
+
+async function personalizedRecommendations(userId: string, page: number, headers: HeadersInit) {
+  const admin = adminClient();
+  if (!admin) return [];
+  const [{ data: profile }, { data: actions }, { data: states }] = await Promise.all([
+    admin.from("taste_profiles").select("feature_weights").eq("user_id", userId).maybeSingle(),
+    admin.from("swipe_actions").select("action, media_kind, metadata").eq("user_id", userId).order("created_at", { ascending: false }).limit(500),
+    admin.from("media_states").select("media_kind, status, rating, metadata").eq("user_id", userId).order("updated_at", { ascending: false }).limit(500),
+  ]);
+
+  // The stored profile is the durable signal. Recent swipes, saved items and
+  // ratings add a small live adjustment so a new preference affects the next deck.
+  const weights: Record<string, number> = { ...((profile?.feature_weights ?? {}) as Record<string, number>) };
+  const actionValues: Record<string, number> = { LOVE: 1.6, SAVE: 0.8, PASS: -0.4, NOT_FOR_ME: -1.6 };
+  for (const row of (actions ?? []) as SignalRow[]) {
+    const amount = actionValues[row.action ?? ""] ?? 0;
+    addWeight(weights, `kind:${row.media_kind ?? ""}`, amount);
+    for (const genre of metadataStrings(row.metadata?.genres)) addWeight(weights, genre, amount);
+    for (const vibe of metadataStrings(row.metadata?.vibes)) addWeight(weights, `vibe:${vibe}`, amount * 0.6);
+  }
+  for (const row of (states ?? []) as StateRow[]) {
+    const statusValue = ({ SAVED: 0.7, IN_PROGRESS: 0.8, COMPLETED: 1.2 } as Record<string, number>)[row.status ?? ""] ?? 0;
+    const ratingValue = row.rating ? (row.rating >= 4 ? 1.5 : row.rating <= 2 ? -1.5 : 0) : 0;
+    const amount = statusValue + ratingValue;
+    addWeight(weights, `kind:${row.media_kind ?? ""}`, amount);
+    for (const genre of metadataStrings(row.metadata?.genres)) addWeight(weights, genre, amount);
+  }
+
+  const favoriteKind = Object.entries(weights)
+    .filter(([feature]) => feature.startsWith("kind:"))
+    .sort(([, left], [, right]) => right - left)[0]?.[0].replace("kind:", "") ?? "";
+  const bookQuery = Object.entries(weights)
+    .filter(([feature, weight]) => !feature.startsWith("kind:") && !feature.startsWith("vibe:") && weight > 0)
+    .sort(([, left], [, right]) => right - left)[0]?.[0] ?? "subject:fiction";
+
+  const screen = await cachedResults(cacheKey("discover", String(page)), 900, async () => {
+    const upstream = await upstreamFetch(`${TMDB}/trending/all/week?language=en-US&page=${page}`, { headers });
+    if (!upstream?.ok) return [];
+    const data = (await upstream.json()) as { results?: TmdbItem[] };
+    return (data.results ?? []).filter((item) => item.media_type === "movie" || item.media_type === "tv").map(mediaItem);
+  });
+  const [books, games, albums] = await Promise.all([
+    cachedResults(cacheKey("books", bookQuery), 3_600, () => searchBooks(bookQuery, 20)),
+    cachedResults("games:trending", 900, discoverGames),
+    cachedResults("albums:trending", 900, discoverAlbums),
+  ]);
+  const candidates = [...screen, ...books, ...games, ...albums] as Array<ReturnType<typeof mediaItem>>;
+  const seen = new Set<string>();
+  return candidates
+    .filter((candidate) => !seen.has(candidate.id) && Boolean(seen.add(candidate.id)))
+    .map((candidate, index) => {
+      const genreScores = (candidate.genres ?? []).map((genre) => ({ genre, score: (weights[genre] ?? 0) + (weights[`genre:${genre}`] ?? 0) }));
+      const strongestGenre = genreScores.sort((left, right) => right.score - left.score)[0];
+      const kindScore = weights[`kind:${candidate.kind}`] ?? 0;
+      const genreScore = genreScores.reduce((total, entry) => total + entry.score, 0);
+      const quality = Math.min(3, Math.max(0, Number(candidate.score ?? 0) > 10 ? Number(candidate.score) / 35 : Number(candidate.score ?? 0) / 4));
+      // A small, deterministic exploration bonus stops the deck becoming only
+      // one format while still making every choice preference-led.
+      const crossMediaBonus = favoriteKind && candidate.kind !== favoriteKind ? 1.1 : 0;
+      const score = kindScore * 0.7 + genreScore + quality + crossMediaBonus + ((index + page) % 5) * 0.03;
+      const reason = strongestGenre?.score > 0.5
+        ? `Because you respond well to ${strongestGenre.genre}.`
+        : kindScore > 0.5
+          ? `Because you keep coming back to ${kindLabel(candidate.kind)}.`
+          : "A fresh pick while Recco learns your taste.";
+      return { ...candidate, reason, _score: score };
+    })
+    .sort((left, right) => right._score - left._score)
+    .map(({ _score, ...candidate }) => candidate);
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (request.method !== "GET") return Response.json({ error: "Method not allowed" }, { status: 405, headers: corsHeaders });
@@ -295,6 +392,12 @@ Deno.serve(async (request) => {
   if (!token) return Response.json({ error: "TMDB is not configured" }, { status: 503, headers: corsHeaders });
   const page = Math.min(100, Math.max(1, Number(url.searchParams.get("page") ?? 1) || 1));
   const headers = { Authorization: `Bearer ${token}`, Accept: "application/json" };
+
+  if (action === "recommendations") {
+    const results = await personalizedRecommendations(userId, page, headers);
+    if (!results.length) return Response.json({ error: "Recommendations are temporarily unavailable" }, { status: 502, headers: corsHeaders });
+    return Response.json({ results }, { headers: { ...corsHeaders, "Cache-Control": "private, max-age=90" } });
+  }
 
   if (action === "discover") {
     const results = await cachedResults(cacheKey("discover", String(page)), 900, async () => {

@@ -25,7 +25,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import type { MediaItem as Media, MediaKind as Kind } from "./src/types/media";
-import { getAlbumRecommendations, getBookRecommendations, getGameRecommendations, getTitleDetails, getTrendingMedia, searchMedia } from "./src/services/media";
+import { getPersonalizedRecommendations, getTitleDetails, searchMedia } from "./src/services/media";
 import { disableDailyReccoReminder, enableDailyReccoReminder, getReminderEnabled } from "./src/services/reminders";
 import {
   ensureGuestSession,
@@ -246,12 +246,6 @@ function ReccoApp() {
       ),
     [filter, query, liveCatalog],
   );
-  const bookQueryFromTaste = (weights: Record<string, number>) => {
-    const [feature] = Object.entries(weights)
-      .filter(([name, value]) => !name.startsWith("kind:") && value > 0)
-      .sort(([, left], [, right]) => right - left)[0] ?? [];
-    return feature || "subject:fiction";
-  };
   useEffect(() => {
     void ensureGuestSession()
       .then(async () => {
@@ -260,7 +254,7 @@ function ReccoApp() {
       })
       .then(({ states, taste }) => {
         setTasteWeights(taste);
-        if (!states.length) return getBookRecommendations(bookQueryFromTaste(taste));
+        if (!states.length) return;
         setLibraryItems(Object.fromEntries(states.map((state) => [state.media_id, {
           id: state.media_id,
           kind: state.metadata.kind ?? state.media_kind,
@@ -278,19 +272,18 @@ function ReccoApp() {
         setRating(Object.fromEntries(states.filter((state) => state.rating).map((state) => [state.media_id, state.rating ?? 0])));
         setEpisodeProgress(Object.assign({}, ...states.map((state) => state.progress ?? {})));
         setTrackingMeta(Object.fromEntries(states.map((state) => [state.media_id, state.metadata.tracking ?? {}])));
-        return getBookRecommendations(bookQueryFromTaste(taste));
       })
-      .then((liveBooks) => liveBooks && setBooks(liveBooks))
       .catch(() => undefined);
-    void getTrendingMedia()
-      .then((liveTitles) => {
-        setTrending(liveTitles);
+    void getPersonalizedRecommendations()
+      .then((recommendations) => {
+        setTrending(recommendations.filter((item) => item.kind === "FILM" || item.kind === "SHOW"));
+        setBooks(recommendations.filter((item) => item.kind === "BOOK"));
+        setGames(recommendations.filter((item) => item.kind === "GAME"));
+        setAlbums(recommendations.filter((item) => item.kind === "ALBUM"));
         setCatalogError(false);
       })
       .catch(() => setCatalogError(true))
       .finally(() => setCatalogLoading(false));
-    void getGameRecommendations().then(setGames).catch(() => undefined);
-    void getAlbumRecommendations().then(setAlbums).catch(() => undefined);
   }, []);
   useEffect(() => {
     void loadCollections().then(setCollections).catch(() => undefined);
@@ -1173,7 +1166,7 @@ function SwipeDeck({
     loadingPage.current = true;
     setLoadingMore(true);
     const page = nextPage.current++;
-    getTrendingMedia(page)
+    getPersonalizedRecommendations(page)
       .then((incoming) => {
         setQueue((current) => {
           const queued = new Set(current.map((entry) => entry.id));
@@ -1356,9 +1349,9 @@ function SwipeDeck({
             <Text style={styles.deckMeta}>
               {item.by} · {item.year}
             </Text>
-            {!!item.genres?.length && (
-              <Text numberOfLines={1} style={styles.deckGenres}>Because you lean toward {item.genres.slice(0, 3).join(" · ")}</Text>
-            )}
+            <Text numberOfLines={1} style={styles.deckGenres}>
+              {item.reason ?? (item.genres?.length ? `Because you lean toward ${item.genres.slice(0, 3).join(" · ")}` : "A fresh pick while Recco learns your taste.")}
+            </Text>
             <Text style={styles.deckNote}>{item.note}</Text>
           </View>
         </Reanimated.View>
