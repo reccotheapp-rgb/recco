@@ -33,6 +33,7 @@ import {
   createCollection,
   getAccountState,
   loadCollections,
+  loadSharedCollection,
   loadEpisodeReviews,
   loadMediaReview,
   loadMediaStates,
@@ -42,6 +43,7 @@ import {
   saveEpisodeReview,
   saveMediaReview,
   requestAccountUpgrade,
+  setCollectionVisibility,
   type Collection,
   syncMediaState,
   syncSwipeAction,
@@ -165,6 +167,7 @@ function ReccoApp() {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [collectionDraft, setCollectionDraft] = useState("");
   const [collectionMessage, setCollectionMessage] = useState("");
+  const [sharedCollection, setSharedCollection] = useState<{ title: string; description: string; items: Media[] } | null>(null);
   const buzz = () =>
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
       () => undefined,
@@ -281,6 +284,11 @@ function ReccoApp() {
   useEffect(() => {
     const refreshAccount = () => void getAccountState().then(setAccount).catch(() => undefined);
     const handleUrl = ({ url }: { url: string }) => {
+      const collectionToken = /^recco:\/\/collection\/([0-9a-f-]+)$/i.exec(url)?.[1];
+      if (collectionToken) {
+        void loadSharedCollection(collectionToken).then(setSharedCollection).catch(() => undefined);
+        return;
+      }
       void completeAccountRedirect(url).then((completed) => {
         if (completed) {
           refreshAccount();
@@ -800,10 +808,16 @@ function ReccoApp() {
         </View>
         {!!collectionMessage && <Text style={styles.collectionMessage}>{collectionMessage}</Text>}
         {collections.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.collectionRail}>
-          {collections.map((collection) => <Tap key={collection.id} onPress={() => void Share.share({ message: `My private Recco collection: ${collection.title}. ${collection.itemCount} title${collection.itemCount === 1 ? "" : "s"} saved so far.` }).catch(() => undefined)} style={styles.collectionCard}>
+          {collections.map((collection) => <Tap key={collection.id} onPress={() => {
+            const message = collection.visibility === "UNLISTED" ? `A Recco collection for you: ${collection.title}\nrecco://collection/${collection.share_token}` : `My private Recco collection: ${collection.title}. ${collection.itemCount} title${collection.itemCount === 1 ? "" : "s"} saved so far.`;
+            void Share.share({ message }).catch(() => undefined);
+          }} style={styles.collectionCard}>
             <View style={styles.collectionCardIcon}><Ionicons name="layers-outline" size={19} color={C.ink} /></View>
             <Text numberOfLines={2} style={styles.collectionCardTitle}>{collection.title}</Text>
-            <Text style={styles.collectionCardMeta}>{collection.itemCount} titles · Private</Text>
+            <Text style={styles.collectionCardMeta}>{collection.itemCount} titles · {collection.visibility === "UNLISTED" ? "Link ready" : "Private"}</Text>
+            <Tap onPress={() => void setCollectionVisibility(collection.id, collection.visibility === "PRIVATE" ? "UNLISTED" : "PRIVATE").then(() => setCollections((current) => current.map((entry) => entry.id === collection.id ? { ...entry, visibility: entry.visibility === "PRIVATE" ? "UNLISTED" : "PRIVATE" } : entry))).catch(() => undefined)} style={styles.collectionVisibility}>
+              <Text style={styles.collectionVisibilityText}>{collection.visibility === "PRIVATE" ? "MAKE SHAREABLE" : "MAKE PRIVATE"}</Text>
+            </Tap>
           </Tap>)}
         </ScrollView> : <Text style={styles.collectionEmpty}>Create a private shelf for a mood, a person, or a future night in.</Text>}
       </Section>
@@ -984,7 +998,7 @@ function ReccoApp() {
             onAddToCollection={() => {
               const collection = collections[0];
               if (!collection) return;
-              void addMediaToCollection(collection.id, selected.id).then(() => {
+              void addMediaToCollection(collection.id, selected).then(() => {
                 setCollections((current) => current.map((entry) => entry.id === collection.id ? { ...entry, itemCount: entry.itemCount + 1 } : entry));
               }).catch(() => undefined);
             }}
@@ -1044,6 +1058,7 @@ function ReccoApp() {
           setTasteWeights((current) => features.reduce((next, feature) => ({ ...next, [feature]: (next[feature] ?? 0) + 2 }), { ...current }));
           void seedTasteProfile(features).catch(() => undefined);
         }} />}
+        {sharedCollection && <SharedCollection collection={sharedCollection} onClose={() => setSharedCollection(null)} onOpen={open} />}
       </SafeAreaView>
     </View>
   );
@@ -1748,6 +1763,23 @@ function Detail({
     </View>
   );
 }
+function SharedCollection({ collection, onClose, onOpen }: { collection: { title: string; description: string; items: Media[] }; onClose: () => void; onOpen: (item: Media) => void }) {
+  return <View style={styles.overlay}>
+    <View style={[styles.sheet, styles.sharedSheet]}>
+      <Tap onPress={onClose} style={styles.close}><Ionicons name="close" size={20} color={C.ivory} /></Tap>
+      <Text style={styles.heroEyebrow}>A SHARED RECCO COLLECTION</Text>
+      <Text style={styles.sharedTitle}>{collection.title}</Text>
+      {!!collection.description && <Text style={styles.sharedDescription}>{collection.description}</Text>}
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sharedList}>
+        {collection.items.map((item) => <Tap key={item.id} onPress={() => onOpen(item)} style={styles.sharedItem}>
+          <Image source={{ uri: item.image }} style={styles.sharedPoster} />
+          <View style={{ flex: 1 }}><Text style={[styles.mediaKind, { color: kindAccent[item.kind] }]}>{kindName[item.kind]}</Text><Text numberOfLines={2} style={styles.sharedItemTitle}>{shortTitle(item.title, 34)}</Text><Text style={styles.sharedItemMeta}>{item.by} · {item.year}</Text></View>
+          <Ionicons name="arrow-forward" size={16} color={C.teal} />
+        </Tap>)}
+      </ScrollView>
+    </View>
+  </View>;
+}
 function Onboarding({ onDone }: { onDone: (features: string[]) => void }) {
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<string[]>([]);
@@ -2189,6 +2221,8 @@ const styles = StyleSheet.create({
   collectionCardIcon: { width: 31, height: 31, borderRadius: 10, backgroundColor: C.teal, alignItems: "center", justifyContent: "center" },
   collectionCardTitle: { color: C.ivory, fontSize: 14, lineHeight: 17, fontWeight: "900", marginTop: 11 },
   collectionCardMeta: { color: C.muted, fontSize: 9, marginTop: 4 },
+  collectionVisibility: { alignSelf: "flex-start", marginTop: 8, paddingVertical: 4 },
+  collectionVisibilityText: { color: C.teal, fontSize: 8, letterSpacing: 0.6, fontWeight: "900" },
   collectionEmpty: { color: C.muted, fontSize: 11, lineHeight: 16, marginTop: 13 },
   libraryFilter: {
     borderWidth: 1,
@@ -2346,6 +2380,14 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 28,
     padding: 20,
   },
+  sharedSheet: { minHeight: "58%", paddingTop: 54 },
+  sharedTitle: { color: C.ivory, fontSize: 28, lineHeight: 31, letterSpacing: -1, fontWeight: "900", marginTop: 8, paddingRight: 35 },
+  sharedDescription: { color: C.muted, fontSize: 11, lineHeight: 16, marginTop: 8 },
+  sharedList: { gap: 8, paddingTop: 19, paddingBottom: 12 },
+  sharedItem: { minHeight: 77, borderRadius: 14, padding: 8, backgroundColor: C.surface, flexDirection: "row", gap: 10, alignItems: "center" },
+  sharedPoster: { width: 43, height: 60, borderRadius: 8, backgroundColor: C.surface2 },
+  sharedItemTitle: { color: C.ivory, fontSize: 14, fontWeight: "900", marginTop: 3 },
+  sharedItemMeta: { color: C.muted, fontSize: 10, marginTop: 3 },
   detailScroll: { paddingBottom: 18 },
   grab: {
     width: 37,

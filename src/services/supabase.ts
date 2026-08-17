@@ -82,13 +82,26 @@ export async function createCollection(title: string, description = "") {
   return { ...(data as Omit<Collection, "itemCount">), itemCount: 0 } as Collection;
 }
 
-export async function addMediaToCollection(collectionId: string, mediaId: string) {
+export async function addMediaToCollection(collectionId: string, item: MediaItem) {
   const user = await ensureGuestSession();
   if (!supabase || !user) return;
   const { error } = await supabase
     .from("collection_items")
-    .upsert({ collection_id: collectionId, media_id: mediaId }, { onConflict: "collection_id,media_id", ignoreDuplicates: true });
+    .upsert({ collection_id: collectionId, media_id: item.id, media_snapshot: item }, { onConflict: "collection_id,media_id", ignoreDuplicates: true });
   if (error) throw error;
+}
+
+export async function setCollectionVisibility(collectionId: string, visibility: Collection["visibility"]) {
+  const user = await ensureGuestSession();
+  if (!supabase || !user) return;
+  const { error } = await supabase.from("collections").update({ visibility, updated_at: new Date().toISOString() }).eq("id", collectionId);
+  if (error) throw error;
+}
+
+export async function loadSharedCollection(token: string): Promise<{ title: string; description: string; items: MediaItem[] }> {
+  const response = await fetch(`${appConfig.supabaseUrl}/functions/v1/collection-share?token=${encodeURIComponent(token)}`, { headers: { apikey: appConfig.supabasePublishableKey } });
+  if (!response.ok) throw new Error("This collection is unavailable.");
+  return response.json() as Promise<{ title: string; description: string; items: MediaItem[] }>;
 }
 
 export type MediaStatus = "SAVED" | "IN_PROGRESS" | "COMPLETED" | "PAUSED" | "DROPPED";
