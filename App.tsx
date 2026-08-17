@@ -10,10 +10,12 @@ import {
   BackHandler,
   Image,
   KeyboardAvoidingView,
+  Linking,
   PanResponder,
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -26,6 +28,8 @@ import { getBookRecommendations, getTitleDetails, getTrendingMedia, searchMedia 
 import { disableDailyReccoReminder, enableDailyReccoReminder, getReminderEnabled } from "./src/services/reminders";
 import {
   ensureGuestSession,
+  completeAccountRedirect,
+  getAccountState,
   loadEpisodeReviews,
   loadMediaReview,
   loadMediaStates,
@@ -34,6 +38,7 @@ import {
   seedTasteProfile,
   saveEpisodeReview,
   saveMediaReview,
+  requestAccountUpgrade,
   syncMediaState,
   syncSwipeAction,
   type TasteAction,
@@ -150,6 +155,9 @@ function ReccoApp() {
   const [tasteWeights, setTasteWeights] = useState<Record<string, number>>({});
   const [libraryFilter, setLibraryFilter] = useState<"ALL" | "SAVED" | "TRACKING" | "FINISHED">("ALL");
   const [reminderEnabled, setReminderEnabled] = useState(false);
+  const [account, setAccount] = useState<{ email: string | null; isAnonymous: boolean }>({ email: null, isAnonymous: true });
+  const [accountEmailInput, setAccountEmailInput] = useState("");
+  const [accountMessage, setAccountMessage] = useState("");
   const buzz = () =>
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
       () => undefined,
@@ -259,6 +267,21 @@ function ReccoApp() {
   }, []);
   useEffect(() => {
     void getReminderEnabled().then(setReminderEnabled).catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    const refreshAccount = () => void getAccountState().then(setAccount).catch(() => undefined);
+    const handleUrl = ({ url }: { url: string }) => {
+      void completeAccountRedirect(url).then((completed) => {
+        if (completed) {
+          refreshAccount();
+          setAccountMessage("Your archive is now secured to this account.");
+        }
+      }).catch(() => setAccountMessage("That link could not be completed. Request a new one from Profile."));
+    };
+    refreshAccount();
+    void Linking.getInitialURL().then((url) => url && handleUrl({ url }));
+    const subscription = Linking.addEventListener("url", handleUrl);
+    return () => subscription.remove();
   }, []);
   useEffect(() => {
     AsyncStorage.getItem("recco-library-v1")
@@ -805,7 +828,24 @@ function ReccoApp() {
           <Image source={RECCO_MARK} style={styles.profileMark} />
         </View>
         <Text style={styles.profileName}>Your Recco</Text>
-        <Text style={styles.profileHandle}>A private media archive</Text>
+        <Text style={styles.profileHandle}>{account.isAnonymous ? "A private guest archive" : account.email ?? "A private media archive"}</Text>
+      </View>
+      <View style={styles.accountCard}>
+        <Text style={styles.heroEyebrow}>ACCOUNT & BACKUP</Text>
+        <Text style={styles.accountTitle}>{account.isAnonymous ? "Keep your archive across devices." : "Your archive is backed up."}</Text>
+        <Text style={styles.accountText}>{account.isAnonymous ? "Add an email to claim this archive. Your saves, progress, reviews and taste profile stay exactly where they are." : "This account owns your private library and can be used to restore it on another device."}</Text>
+        {account.isAnonymous ? <>
+          <TextInput value={accountEmailInput} onChangeText={setAccountEmailInput} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} placeholder="you@email.com" placeholderTextColor={C.muted} style={styles.accountInput} />
+          <Tap onPress={() => {
+            const email = accountEmailInput.trim();
+            if (!/^\S+@\S+\.\S+$/.test(email)) { setAccountMessage("Enter a valid email address."); return; }
+            setAccountMessage("Sending your secure confirmation link…");
+            void requestAccountUpgrade(email).then(() => setAccountMessage("Check your email, then open the confirmation link on this phone.")).catch(() => setAccountMessage("Could not send the confirmation link. Check your email Auth settings and try again."));
+          }} style={styles.accountButton}>
+            <Text style={styles.primaryText}>Secure this archive</Text><Ionicons name="shield-checkmark-outline" size={17} color={C.ink} />
+          </Tap>
+        </> : null}
+        {!!accountMessage && <Text style={styles.accountMessage}>{accountMessage}</Text>}
       </View>
       <View style={styles.tasteCard}>
         <Text style={styles.mediaKind}>YOUR TASTE PROFILE</Text>
@@ -1652,6 +1692,10 @@ function Detail({
           <Ionicons name="checkmark-circle-outline" size={17} color={C.teal} />
           <Text style={styles.completeText}>Mark as finished</Text>
         </Tap>
+        <Tap onPress={() => void Share.share({ message: `A Recco for you: ${item.title} (${item.year}). ${item.note || "Added from my personal media archive."}` }).catch(() => undefined)} style={styles.shareReccoBtn}>
+          <Ionicons name="share-outline" size={16} color={C.muted} />
+          <Text style={styles.shareReccoText}>Share this Recco</Text>
+        </Tap>
       </View>
     </View>
   );
@@ -2160,6 +2204,12 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   profileHandle: { color: C.muted, fontSize: 12, marginTop: 3 },
+  accountCard: { padding: 17, borderRadius: 20, backgroundColor: "#12322D", borderWidth: 1, borderColor: "#236256", marginTop: 12, marginBottom: 2 },
+  accountTitle: { color: C.ivory, fontSize: 18, letterSpacing: -0.4, fontWeight: "900", marginTop: 7 },
+  accountText: { color: "#B7D3CB", fontSize: 11, lineHeight: 16, marginTop: 7 },
+  accountInput: { height: 47, paddingHorizontal: 12, borderRadius: 12, color: C.ivory, backgroundColor: C.ink, marginTop: 14, fontSize: 13 },
+  accountButton: { minHeight: 45, borderRadius: 13, backgroundColor: C.teal, marginTop: 9, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
+  accountMessage: { color: C.teal, fontSize: 10, lineHeight: 14, marginTop: 10 },
   tasteCard: {
     marginTop: 26,
     padding: 21,
@@ -2379,6 +2429,8 @@ const styles = StyleSheet.create({
   primaryText: { color: C.ink, fontSize: 12, fontWeight: "900" },
   completeBtn: { minHeight: 38, marginTop: 10, borderRadius: 12, flexDirection: "row", gap: 7, alignItems: "center", justifyContent: "center" },
   completeText: { color: C.teal, fontSize: 11, fontWeight: "900" },
+  shareReccoBtn: { minHeight: 35, flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center" },
+  shareReccoText: { color: C.muted, fontSize: 10, fontWeight: "800" },
   onboard: {
     ...StyleSheet.absoluteFill,
     zIndex: 25,

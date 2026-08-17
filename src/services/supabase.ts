@@ -31,6 +31,30 @@ export async function getCatalogAccessToken() {
   return data.session?.access_token ?? null;
 }
 
+export type AccountState = { email: string | null; isAnonymous: boolean };
+
+export async function getAccountState(): Promise<AccountState> {
+  const user = await ensureGuestSession();
+  return { email: user?.email ?? null, isAnonymous: Boolean(user?.is_anonymous) };
+}
+
+export async function requestAccountUpgrade(email: string) {
+  const user = await ensureGuestSession();
+  if (!supabase || !user) throw new Error("Recco could not start a secure session.");
+  const { error } = await supabase.auth.updateUser(
+    { email: email.trim().toLowerCase() },
+    { emailRedirectTo: "recco://auth/callback" },
+  );
+  if (error) throw error;
+}
+
+export async function completeAccountRedirect(url: string) {
+  if (!supabase || !url.startsWith("recco://auth/callback")) return false;
+  const { error } = await supabase.auth.exchangeCodeForSession(url);
+  if (error) throw error;
+  return true;
+}
+
 export type MediaStatus = "SAVED" | "IN_PROGRESS" | "COMPLETED" | "PAUSED" | "DROPPED";
 
 type MediaSyncOptions = {
