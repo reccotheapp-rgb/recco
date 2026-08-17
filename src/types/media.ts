@@ -1,4 +1,4 @@
-export type MediaKind = 'FILM' | 'SHOW' | 'BOOK' | 'ALBUM';
+export type MediaKind = 'FILM' | 'SHOW' | 'BOOK' | 'ALBUM' | 'GAME';
 
 export type MediaItem = {
   id: string;

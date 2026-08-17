@@ -24,7 +24,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import type { MediaItem as Media, MediaKind as Kind } from "./src/types/media";
-import { getBookRecommendations, getTitleDetails, getTrendingMedia, searchMedia } from "./src/services/media";
+import { getBookRecommendations, getGameRecommendations, getTitleDetails, getTrendingMedia, searchMedia } from "./src/services/media";
 import { disableDailyReccoReminder, enableDailyReccoReminder, getReminderEnabled } from "./src/services/reminders";
 import {
   ensureGuestSession,
@@ -59,18 +59,21 @@ const kindIcon: Record<Kind, keyof typeof Ionicons.glyphMap> = {
   SHOW: "tv-outline",
   BOOK: "book-outline",
   ALBUM: "musical-notes-outline",
+  GAME: "game-controller-outline",
 };
 const kindName: Record<Kind, string> = {
   FILM: "Film",
   SHOW: "Series",
   BOOK: "Book",
   ALBUM: "Album",
+  GAME: "Game",
 };
 const kindAccent: Record<Kind, string> = {
   FILM: "#51D4F4",
   SHOW: "#B9A4FF",
   BOOK: "#FF9B70",
   ALBUM: "#73E0A8",
+  GAME: "#D7E86B",
 };
 const tasteVibes = ["Escapist", "Intense", "Comfort", "Cerebral", "Tender"];
 
@@ -148,11 +151,12 @@ function ReccoApp() {
   const [trackingMeta, setTrackingMeta] = useState<Record<string, TrackingMeta>>({});
   const [hydrated, setHydrated] = useState(false);
   const [query, setQuery] = useState("");
-  const [searchKind, setSearchKind] = useState<"FILM" | "SHOW" | "BOOK">("FILM");
+  const [searchKind, setSearchKind] = useState<"FILM" | "SHOW" | "BOOK" | "GAME">("FILM");
   const [filter, setFilter] = useState<"ALL" | Kind>("ALL");
   const [remoteResults, setRemoteResults] = useState<Media[]>([]);
   const [trending, setTrending] = useState<Media[]>([]);
   const [books, setBooks] = useState<Media[]>([]);
+  const [games, setGames] = useState<Media[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -180,7 +184,7 @@ function ReccoApp() {
   const findItem = (id: string) =>
     selected?.id === id
       ? selected
-      : libraryItems[id] ?? trending.find((item) => item.id === id) ?? books.find((item) => item.id === id);
+      : libraryItems[id] ?? trending.find((item) => item.id === id) ?? books.find((item) => item.id === id) ?? games.find((item) => item.id === id);
   const save = (id: string) => {
     buzz();
     setSaved((items) =>
@@ -202,10 +206,10 @@ function ReccoApp() {
         () => undefined,
       );
   };
-  const liveCatalog = [...trending, ...books];
+  const liveCatalog = [...trending, ...books, ...games];
   const swipeItems = useMemo(
-    () => trending.flatMap((entry, index) => books[index] ? [entry, books[index]] : [entry]),
-    [trending, books],
+    () => trending.flatMap((entry, index) => [entry, books[index], games[index]].filter(Boolean) as Media[]),
+    [trending, books, games],
   );
   const allShelfItems = Object.values(libraryItems).filter(
     (item) => saved.includes(item.id) || tracked.includes(item.id) || completed.includes(item.id),
@@ -250,7 +254,7 @@ function ReccoApp() {
           id: state.media_id,
           kind: state.metadata.kind ?? state.media_kind,
           title: state.metadata.title ?? state.title,
-          by: state.metadata.by ?? (state.media_kind === "SHOW" ? "TV series" : state.media_kind === "BOOK" ? "Book" : "Film"),
+          by: state.metadata.by ?? (state.media_kind === "SHOW" ? "TV series" : state.media_kind === "BOOK" ? "Book" : state.media_kind === "GAME" ? "Game" : "Film"),
           year: state.metadata.year ?? "",
           image: state.metadata.image ?? state.image_url ?? "",
           note: state.metadata.note ?? "",
@@ -274,6 +278,7 @@ function ReccoApp() {
       })
       .catch(() => setCatalogError(true))
       .finally(() => setCatalogLoading(false));
+    void getGameRecommendations().then(setGames).catch(() => undefined);
   }, []);
   useEffect(() => {
     void loadCollections().then(setCollections).catch(() => undefined);
@@ -591,6 +596,27 @@ function ReccoApp() {
           </ScrollView>
         </Section>
       )}
+      {games.length > 0 && (
+        <Section title="Games for you">
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.rail}
+          >
+            {games.slice(0, 6).map((item) => (
+              <View key={item.id}>
+                <Poster item={item} />
+                <Text numberOfLines={1} style={styles.railTitle}>
+                  {shortTitle(item.title, 23)}
+                </Text>
+                <Text numberOfLines={1} style={styles.railMeta}>
+                  {item.by}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+        </Section>
+      )}
       <Section title="Choose your next world">
         <View style={styles.worldGrid}>
           {(["FILM", "SHOW", "BOOK"] as const).map((kind) => (
@@ -642,7 +668,7 @@ function ReccoApp() {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.chips}
       >
-        {(["ALL", "FILM", "SHOW", "BOOK"] as const).map((item) => (
+        {(["ALL", "FILM", "SHOW", "BOOK", "GAME"] as const).map((item) => (
           <Tap
             key={item}
             onPress={() => setFilter(item)}
@@ -672,7 +698,7 @@ function ReccoApp() {
             <Ionicons name="sparkles-outline" size={28} color={C.teal} />
             <Text style={styles.emptyTitle}>Refreshing your picks</Text>
             <Text style={styles.emptyText}>
-              Live film and series recommendations will appear here in a moment.
+              Live film, series, book, and game recommendations will appear here in a moment.
             </Text>
           </View>
         )}
@@ -691,9 +717,9 @@ function ReccoApp() {
       contentContainerStyle={styles.scroll}
     >
       <Header label="SEARCH" />
-      <Text style={styles.display}>Find your{`\n`}{searchKind === "SHOW" ? "next series." : searchKind === "BOOK" ? "next book." : "next film."}</Text>
+      <Text style={styles.display}>Find your{`\n`}{searchKind === "SHOW" ? "next series." : searchKind === "BOOK" ? "next book." : searchKind === "GAME" ? "next game." : "next film."}</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.searchTypeRail}>
-        {(["FILM", "SHOW", "BOOK"] as const).map((kind) => {
+        {(["FILM", "SHOW", "BOOK", "GAME"] as const).map((kind) => {
           const active = searchKind === kind;
           return <Tap key={kind} onPress={() => setSearchKind(kind)} style={[styles.searchType, active && styles.searchTypeActive]}>
             <Ionicons name={kindIcon[kind]} size={15} color={active ? C.ink : kindAccent[kind]} />
@@ -937,7 +963,7 @@ function ReccoApp() {
       </Section>
       <View style={styles.creditsCard}>
         <Text style={styles.heroEyebrow}>DATA & CREDITS</Text>
-        <Text style={styles.creditsText}>This product uses the TMDB API but is not endorsed or certified by TMDB.</Text>
+        <Text style={styles.creditsText}>This product uses the TMDB API but is not endorsed or certified by TMDB. Game data and images: RAWG.</Text>
       </View>
     </ScrollView>
   );

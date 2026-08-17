@@ -5,7 +5,7 @@ import { getCatalogAccessToken } from "./supabase";
 type MediaSearchResponse = { results: MediaItem[] };
 
 async function mediaCatalog(
-  action: "discover" | "search" | "books" | "details",
+  action: "discover" | "search" | "books" | "games" | "details",
   params: Record<string, string> = {},
 ) {
   const token = await getCatalogAccessToken();
@@ -44,7 +44,7 @@ export type TitleDetails = {
  * The mobile app talks only to Recco's backend. It must never call TMDB
  * directly or include a TMDB credential in the compiled app.
  */
-export type SearchKind = "FILM" | "SHOW" | "BOOK";
+export type SearchKind = "FILM" | "SHOW" | "BOOK" | "GAME";
 
 export async function searchMedia(query: string, kind: SearchKind): Promise<MediaItem[]> {
   if (!query.trim()) return [];
@@ -59,6 +59,10 @@ export async function getTrendingMedia(page = 1): Promise<MediaItem[]> {
 
 export async function getBookRecommendations(query = "subject:fiction"): Promise<MediaItem[]> {
   return ((await mediaCatalog("books", { q: query })) as MediaSearchResponse).results;
+}
+
+export async function getGameRecommendations(): Promise<MediaItem[]> {
+  return ((await mediaCatalog("games")) as MediaSearchResponse).results;
 }
 
 export async function getTitleDetails(
