@@ -1195,19 +1195,27 @@ function SwipeDeck({
       });
   }, [deckError, index, loadAttempt, queue.length]);
   useEffect(() => {
-    [next, third].forEach((entry) => {
+    // Warm several full-resolution images ahead of the active card. Android's
+    // default image fade and late decoding were the visible flash after a swipe.
+    queue.slice(index + 1, index + 5).forEach((entry) => {
       if (entry?.image) void Image.prefetch(entry.image).catch(() => undefined);
     });
-  }, [next?.image, third?.image]);
+  }, [index, queue]);
   const finishSwipe = (action: TasteAction) => {
     if (!item) return;
-    onSignal(item, action, selectedVibes);
+    const swipedItem = item;
+    const swipedVibes = selectedVibes;
     seenIds.current.add(item.id);
     setIndex((value) => value + 1);
     setSelectedVibes([]);
     translateX.value = 0;
     translateY.value = 0;
-    swipeInFlight.current = false;
+    // Let React promote the already-rendered next card first. Syncing its
+    // taste signal changes Home state and used to compete with that handoff.
+    requestAnimationFrame(() => {
+      swipeInFlight.current = false;
+      onSignal(swipedItem, action, swipedVibes);
+    });
   };
   const advance = (action: TasteAction) => {
     if (!item || swipeInFlight.current) return;
@@ -1308,7 +1316,7 @@ function SwipeDeck({
         <View style={[styles.nextDeckCard, styles.peekDeckCard]}>
           {next && (
             <>
-              <Image source={{ uri: next.image }} style={styles.deckImage} />
+              <Image source={{ uri: next.image }} style={styles.deckImage} fadeDuration={0} resizeMethod="resize" />
               <LinearGradient
                 colors={["transparent", "rgba(4,8,7,.96)"]}
                 style={styles.posterShade}
@@ -1325,7 +1333,7 @@ function SwipeDeck({
         </View>
         <GestureDetector gesture={pan}>
         <Reanimated.View style={[styles.deckCard, deckMotion]}>
-          <Image source={{ uri: item.image }} style={styles.deckImage} />
+          <Image source={{ uri: item.image }} style={styles.deckImage} fadeDuration={0} resizeMethod="resize" />
           <LinearGradient
             colors={["transparent", "rgba(4,8,7,.96)"]}
             style={styles.posterShade}

@@ -79,7 +79,8 @@ function mediaItem(item: TmdbItem, forcedType?: "movie" | "tv") {
     title: String(item.title ?? item.name ?? "Untitled"),
     by: mediaType === "tv" ? "TV series" : "Film",
     year: String(item.release_date ?? item.first_air_date ?? "").slice(0, 4) || "—",
-    image: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : "",
+    // Cards occupy most of a phone screen, so w500 source art looked soft.
+    image: item.poster_path ? `https://image.tmdb.org/t/p/w780${item.poster_path}` : "",
     note: String(item.overview ?? ""),
     score: Number(item.vote_average ?? 0),
     genres,
@@ -98,7 +99,9 @@ function bookItem(volume: TmdbItem) {
   const images = (info.imageLinks ?? {}) as TmdbItem;
   const authors = Array.isArray(info.authors) ? info.authors.map(String).filter(Boolean) : [];
   const categories = Array.isArray(info.categories) ? info.categories.map(String).filter(Boolean) : [];
-  const thumbnail = String(images.thumbnail ?? images.smallThumbnail ?? "").replace(/^http:/, "https:");
+  const thumbnail = String(images.thumbnail ?? images.smallThumbnail ?? "")
+    .replace(/^http:/, "https:")
+    .replace(/([?&])zoom=1\b/, "$1zoom=2");
   return {
     id: `google-book-${volume.id}`,
     kind: "BOOK",
@@ -207,7 +210,7 @@ function albumItem(releaseGroup: TmdbItem) {
     title: String(releaseGroup.title ?? "Untitled album"),
     by: credit,
     year: String(releaseGroup["first-release-date"] ?? "").slice(0, 4) || "—",
-    image: id ? `https://coverartarchive.org/release-group/${id}/front-500` : "",
+    image: id ? `https://coverartarchive.org/release-group/${id}/front-1200` : "",
     note: tags.length ? `${tags.join(" · ")} album` : "Album",
     genres: tags,
   };
@@ -332,14 +335,14 @@ async function personalizedRecommendations(userId: string, page: number, headers
     .filter(([feature, weight]) => !feature.startsWith("kind:") && !feature.startsWith("vibe:") && weight > 0)
     .sort(([, left], [, right]) => right - left)[0]?.[0] ?? "subject:fiction";
 
-  const screen = await cachedResults(cacheKey("discover", String(page)), 900, async () => {
+  const screen = await cachedResults(cacheKey("discover-v2", String(page)), 900, async () => {
     const upstream = await upstreamFetch(`${TMDB}/trending/all/week?language=en-US&page=${page}`, { headers });
     if (!upstream?.ok) return [];
     const data = (await upstream.json()) as { results?: TmdbItem[] };
     return (data.results ?? []).filter((item) => item.media_type === "movie" || item.media_type === "tv").map(mediaItem);
   });
   const [books, games, albums] = await Promise.all([
-    cachedResults(cacheKey("books", bookQuery), 3_600, () => searchBooks(bookQuery, 20)),
+    cachedResults(cacheKey("books-v2", bookQuery), 3_600, () => searchBooks(bookQuery, 20)),
     cachedResults("games:trending", 900, discoverGames),
     cachedResults("albums:trending", 900, discoverAlbums),
   ]);
@@ -420,7 +423,7 @@ Deno.serve(async (request) => {
   }
 
   if (action === "discover") {
-    const results = await cachedResults(cacheKey("discover", String(page)), 900, async () => {
+    const results = await cachedResults(cacheKey("discover-v2", String(page)), 900, async () => {
       const upstream = await upstreamFetch(`${TMDB}/trending/all/week?language=en-US&page=${page}`, { headers });
       if (!upstream?.ok) return [];
       const data = (await upstream.json()) as { results?: TmdbItem[] };
@@ -438,19 +441,19 @@ Deno.serve(async (request) => {
       return Response.json({ error: "An unsupported media type was requested" }, { status: 400, headers: corsHeaders });
     }
     if (requestedKind === "BOOK") {
-      const books = await cachedResults(cacheKey("search", "book", query), 3_600, () => searchBooks(query, 16));
+      const books = await cachedResults(cacheKey("search-v2", "book", query), 3_600, () => searchBooks(query, 16));
       return Response.json({ results: books }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
     }
     if (requestedKind === "GAME") {
-      const games = await cachedResults(cacheKey("search", "game", query), 3_600, () => searchGames(query));
+      const games = await cachedResults(cacheKey("search-v2", "game", query), 3_600, () => searchGames(query));
       return Response.json({ results: games }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
     }
     if (requestedKind === "ALBUM") {
-      const albums = await cachedResults(cacheKey("search", "album", query), 3_600, () => searchAlbums(query));
+      const albums = await cachedResults(cacheKey("search-v2", "album", query), 3_600, () => searchAlbums(query));
       return Response.json({ results: albums }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
     }
     const endpoint = requestedKind === "FILM" ? "movie" : requestedKind === "SHOW" ? "tv" : "multi";
-    const screenResults = await cachedResults(cacheKey("search", requestedKind, query), 3_600, async () => {
+    const screenResults = await cachedResults(cacheKey("search-v2", requestedKind, query), 3_600, async () => {
       const upstream = await upstreamFetch(`${TMDB}/search/${endpoint}?query=${encodeURIComponent(query)}&include_adult=false&language=en-US`, { headers });
       if (!upstream?.ok) return [];
       const data = (await upstream.json()) as { results?: TmdbItem[] };
@@ -464,7 +467,7 @@ Deno.serve(async (request) => {
 
   if (action === "books") {
     const query = url.searchParams.get("q")?.trim() || "subject:fiction";
-    const books = await cachedResults(cacheKey("books", query), 3_600, () => searchBooks(query, 20));
+    const books = await cachedResults(cacheKey("books-v2", query), 3_600, () => searchBooks(query, 20));
     if (!books.length) return Response.json({ error: "Books are unavailable" }, { status: 502, headers: corsHeaders });
     return Response.json({ results: books }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
   }
@@ -490,6 +493,6 @@ Deno.serve(async (request) => {
     genres: Array.isArray(title.genres) ? (title.genres as TmdbItem[]).map((genre) => String(genre.name)).slice(0, 3) : [],
     seasons,
     selectedSeason: season ?? null,
-    episodes: episodes.map((episode) => ({ id: `tmdb-tv-${id}-s${season}-e${episode.episode_number}`, number: Number(episode.episode_number ?? 0), title: String(episode.name ?? "Untitled episode"), runtime: Number(episode.runtime ?? episodeRuntime), airDate: String(episode.air_date ?? ""), still: episode.still_path ? `https://image.tmdb.org/t/p/w500${episode.still_path}` : "" })),
+    episodes: episodes.map((episode) => ({ id: `tmdb-tv-${id}-s${season}-e${episode.episode_number}`, number: Number(episode.episode_number ?? 0), title: String(episode.name ?? "Untitled episode"), runtime: Number(episode.runtime ?? episodeRuntime), airDate: String(episode.air_date ?? ""), still: episode.still_path ? `https://image.tmdb.org/t/p/w780${episode.still_path}` : "" })),
   }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=86400" } });
 });
