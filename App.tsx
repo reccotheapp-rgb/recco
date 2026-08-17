@@ -4,6 +4,8 @@ import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
+import Reanimated, { Extrapolation, interpolate, runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   Animated,
@@ -11,7 +13,6 @@ import {
   Image,
   KeyboardAvoidingView,
   Linking,
-  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -75,6 +76,13 @@ const kindAccent: Record<Kind, string> = {
   ALBUM: "#73E0A8",
   GAME: "#D7E86B",
 };
+const kindTint: Record<Kind, string> = {
+  FILM: "rgba(81,212,244,.34)",
+  SHOW: "rgba(185,164,255,.34)",
+  BOOK: "rgba(255,155,112,.34)",
+  ALBUM: "rgba(115,224,168,.34)",
+  GAME: "rgba(215,232,107,.34)",
+};
 const tasteVibes = ["Escapist", "Intense", "Comfort", "Cerebral", "Tender"];
 
 function shortTitle(title: string, limit = 27) {
@@ -130,9 +138,11 @@ function Brand({ inverse = false, compact = false }: { inverse?: boolean; compac
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <ReccoApp />
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <ReccoApp />
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
@@ -428,6 +438,7 @@ function ReccoApp() {
         style={wide ? styles.wideImage : styles.poster}
       />
       <View style={[styles.posterTypeRail, { backgroundColor: kindAccent[item.kind] }]} />
+      <LinearGradient colors={[kindTint[item.kind], "transparent"]} style={styles.posterTint} />
       <LinearGradient
         colors={["transparent", "rgba(6,10,9,.92)"]}
         style={styles.posterShade}
@@ -475,6 +486,13 @@ function ReccoApp() {
     .sort(([, left], [, right]) => right - left)
     .slice(0, 3)
     .map(([feature]) => feature);
+  const crossMediaItem = heroItem
+    ? [...books, ...albums, ...games]
+        .sort((left, right) => {
+          const overlap = (entry: Media) => entry.genres?.filter((genre) => heroItem.genres?.includes(genre)).length ?? 0;
+          return overlap(right) - overlap(left);
+        })[0]
+    : undefined;
   const Home = () => (
     <ScrollView
       showsVerticalScrollIndicator={false}
@@ -526,7 +544,7 @@ function ReccoApp() {
           <Ionicons name="sparkles" size={18} color={C.ink} />
         </View>
       </Tap>
-      <Section title={trackingItems.length ? "Continue tracking" : "Start tracking"} action="VIEW LIBRARY">
+      <Section title={trackingItems.length ? "Continue tracking" : "Make this yours"} action={trackingItems.length ? "VIEW LIBRARY" : "DISCOVER"}>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -540,29 +558,22 @@ function ReccoApp() {
                   {shortTitle(item.title, 23)}
                 </Text>
                 <Text style={styles.railMeta}>{item.by}</Text>
-                <View style={styles.progress}>
-                  <View
-                    style={[
-                      styles.progressFill,
-                      { width: item.kind === "SHOW" ? "62%" : "44%" },
-                    ]}
-                  />
-                </View>
+                {trackingItems.includes(item) && <View style={styles.progress}><View style={[styles.progressFill, { width: item.kind === "BOOK" ? `${trackingMeta[item.id]?.bookProgress ?? 0}%` : "100%" }]} /></View>}
               </View>
             ),
           )}
         </ScrollView>
       </Section>
-      {heroItem && books[0] && (
+      {heroItem && crossMediaItem && (
         <Section title="Across your worlds">
-          <Tap onPress={() => open(books[0])} style={styles.crossMediaCard}>
+          <Tap onPress={() => open(crossMediaItem)} style={styles.crossMediaCard}>
             <Image source={{ uri: heroItem.image }} style={styles.crossMediaPoster} />
             <View style={styles.crossMediaRule} />
-            <Image source={{ uri: books[0].image }} style={styles.crossMediaPoster} />
+            <Image source={{ uri: crossMediaItem.image }} style={styles.crossMediaPoster} />
             <View style={styles.crossMediaCopy}>
               <Text style={styles.heroEyebrow}>ONE TASTE · TWO FORMATS</Text>
-              <Text numberOfLines={2} style={styles.crossMediaTitle}>If {shortTitle(heroItem.title, 22)} pulls you in, read {shortTitle(books[0].title, 25)} next.</Text>
-              <Text style={styles.crossMediaMeta}>A cross-media Recco, tuned by your signals.</Text>
+              <Text numberOfLines={2} style={styles.crossMediaTitle}>From {shortTitle(heroItem.title, 22)} to {shortTitle(crossMediaItem.title, 25)}.</Text>
+              <Text style={styles.crossMediaMeta}>{heroItem.genres?.some((genre) => crossMediaItem.genres?.includes(genre)) ? "A shared genre connection." : "A different format for the same kind of night."}</Text>
             </View>
             <Ionicons name="arrow-forward" size={18} color={C.teal} />
           </Tap>
@@ -577,94 +588,19 @@ function ReccoApp() {
           )}
         </View>
       </Section>
-      {books.length > 0 && (
-        <Section title="Books for you">
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.rail}
-          >
-            {books.slice(0, 6).map((item) => (
+      {[...books, ...albums, ...games].length > 0 && (
+        <Section title="More for your taste" action="DISCOVER">
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
+            {[...books, ...albums, ...games].slice(0, 8).map((item) => (
               <View key={item.id}>
                 <Poster item={item} />
-                <Text numberOfLines={1} style={styles.railTitle}>
-                  {shortTitle(item.title, 23)}
-                </Text>
-                <Text numberOfLines={1} style={styles.railMeta}>
-                  {item.by}
-                </Text>
+                <Text numberOfLines={1} style={styles.railTitle}>{shortTitle(item.title, 23)}</Text>
+                <Text numberOfLines={1} style={[styles.railMeta, { color: kindAccent[item.kind] }]}>{kindName[item.kind]} · {item.by}</Text>
               </View>
             ))}
           </ScrollView>
         </Section>
       )}
-      {albums.length > 0 && (
-        <Section title="Albums for you">
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.rail}
-          >
-            {albums.slice(0, 6).map((item) => (
-              <View key={item.id}>
-                <Poster item={item} />
-                <Text numberOfLines={1} style={styles.railTitle}>
-                  {shortTitle(item.title, 23)}
-                </Text>
-                <Text numberOfLines={1} style={styles.railMeta}>
-                  {item.by}
-                </Text>
-              </View>
-            ))}
-          </ScrollView>
-        </Section>
-      )}
-      {games.length > 0 && (
-        <Section title="Games for you">
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.rail}
-          >
-            {games.slice(0, 6).map((item) => (
-              <View key={item.id}>
-                <Poster item={item} />
-                <Text numberOfLines={1} style={styles.railTitle}>
-                  {shortTitle(item.title, 23)}
-                </Text>
-                <Text numberOfLines={1} style={styles.railMeta}>
-                  {item.by}
-                </Text>
-              </View>
-            ))}
-          </ScrollView>
-        </Section>
-      )}
-      <Section title="Choose your next world">
-        <View style={styles.worldGrid}>
-          {(["FILM", "SHOW", "BOOK"] as const).map((kind) => (
-            <Tap key={kind} onPress={() => { setFilter(kind); setTab("Discover"); }} style={[styles.worldCard, { borderColor: `${kindAccent[kind]}80` }]}>
-              <View style={[styles.worldIcon, { backgroundColor: kindAccent[kind] }]}>
-                <Ionicons name={kindIcon[kind]} size={20} color={C.ink} />
-              </View>
-              <Text style={styles.worldTitle}>{kindName[kind]}</Text>
-              <Text style={styles.worldText}>{kind === "FILM" ? "A complete night in." : kind === "SHOW" ? "A world to return to." : "A story to live with."}</Text>
-            </Tap>
-          ))}
-        </View>
-      </Section>
-      <Section title="Your taste, in motion">
-        <Tap onPress={() => setCurating(true)} style={styles.tasteCta}>
-          <View style={styles.tasteCtaIcon}>
-            <Ionicons name="git-network-outline" size={21} color={C.ink} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.tasteCtaTitle}>Build a taste map, not just a watchlist.</Text>
-            <Text style={styles.activityMeta}>MOOD · PACE · FAMILIARITY · COMMITMENT</Text>
-          </View>
-          <Ionicons name="arrow-forward" size={20} color={C.teal} />
-        </Tap>
-      </Section>
     </ScrollView>
   );
   const Discover = () => (
@@ -771,7 +707,8 @@ function ReccoApp() {
             : `EXPLORE ${searchKind === "SHOW" ? "SERIES" : `${kindName[searchKind].toUpperCase()}S`}`}
       </Text>
       <View style={styles.searchCardGrid}>
-        {(query ? remoteResults : results.filter((item) => item.kind === searchKind)).map((item) => (
+        {searching && ["one", "two", "three", "four"].map((key) => <View key={key} style={styles.searchSkeleton}><View style={styles.searchSkeletonLine} /><View style={[styles.searchSkeletonLine, styles.searchSkeletonShort]} /></View>)}
+        {!searching && (query ? remoteResults : results.filter((item) => item.kind === searchKind)).map((item) => (
           <Tap
             key={item.id}
             onPress={() => open(item)}
@@ -787,6 +724,7 @@ function ReccoApp() {
           </Tap>
         ))}
       </View>
+      {!searching && query.length >= 2 && remoteResults.length === 0 && <View style={styles.searchZero}><Ionicons name="sparkles-outline" size={25} color={kindAccent[searchKind]} /><Text style={styles.emptyTitle}>Nothing yet</Text><Text style={styles.emptyText}>Try a title, creator, artist, or a shorter search.</Text></View>}
     </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -893,9 +831,9 @@ function ReccoApp() {
                 <Text numberOfLines={1} style={styles.libraryCardMeta}>
                   {kindName[item.kind]} · {item.year || item.by}
                 </Text>
-                {tracked.includes(item.id) && (
+                {tracked.includes(item.id) && item.kind === "BOOK" && (
                   <View style={styles.libraryProgress}>
-                    <View style={styles.libraryProgressFill} />
+                    <View style={[styles.libraryProgressFill, { width: `${trackingMeta[item.id]?.bookProgress ?? 0}%` }]} />
                   </View>
                 )}
               </View>
@@ -1197,7 +1135,8 @@ function SwipeDeck({
   const [deckError, setDeckError] = useState(false);
   const [selectedVibes, setSelectedVibes] = useState<string[]>([]);
   const [loadAttempt, setLoadAttempt] = useState(0);
-  const card = useRef(new Animated.ValueXY()).current;
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
   const seenIds = useRef(new Set<string>());
   const nextPage = useRef(2);
   const loadingPage = useRef(false);
@@ -1210,17 +1149,24 @@ function SwipeDeck({
   useEffect(() => {
     seenIds.current = new Set();
     nextPage.current = items.length ? 2 : 1;
-    setQueue(items);
-    setIndex(0);
     setLoadingMore(true);
     setDeckError(false);
     loadSwipeHistory()
       .then((history) => {
         seenIds.current = new Set(history);
-        setQueue((current) => current.filter((entry) => !seenIds.current.has(entry.id)));
+        setQueue(items.filter((entry) => !seenIds.current.has(entry.id)));
       })
       .catch(() => undefined)
       .finally(() => setLoadingMore(false));
+  }, []);
+  // A deck is a session. New Home data can enrich the queue, but must never
+  // reset a card someone is already considering.
+  useEffect(() => {
+    setQueue((current) => {
+      const queued = new Set(current.map((entry) => entry.id));
+      const fresh = items.filter((entry) => !queued.has(entry.id) && !seenIds.current.has(entry.id));
+      return fresh.length ? [...current, ...fresh] : current;
+    });
   }, [items]);
   useEffect(() => {
     if (queue.length - index > 5 || loadingPage.current || deckError) return;
@@ -1247,59 +1193,55 @@ function SwipeDeck({
       if (entry?.image) void Image.prefetch(entry.image).catch(() => undefined);
     });
   }, [next?.image, third?.image]);
+  const finishSwipe = (action: TasteAction) => {
+    if (!item) return;
+    onSignal(item, action, selectedVibes);
+    seenIds.current.add(item.id);
+    setIndex((value) => value + 1);
+    setSelectedVibes([]);
+    translateX.value = 0;
+    translateY.value = 0;
+    swipeInFlight.current = false;
+  };
   const advance = (action: TasteAction) => {
     if (!item || swipeInFlight.current) return;
     swipeInFlight.current = true;
-    Animated.timing(card, {
-      toValue: { x: action === "LOVE" || action === "SAVE" ? 500 : -500, y: 25 },
-      duration: 180,
-      useNativeDriver: true,
-    }).start(() => {
-      onSignal(item, action, selectedVibes);
-      seenIds.current.add(item.id);
-      // The old card is already off screen. Resetting it before state changes
-      // prevents a one-frame flash of the next title in the centre.
-      card.setValue({ x: 0, y: 0 });
-      setIndex((value) => value + 1);
-      setSelectedVibes([]);
-      swipeInFlight.current = false;
+    const direction = action === "LOVE" || action === "SAVE" ? 1 : -1;
+    translateX.value = withTiming(direction * 520, { duration: 190 }, (finished) => {
+      if (finished) runOnJS(finishSwipe)(action);
     });
+    translateY.value = withTiming(28, { duration: 190 });
   };
   const pan = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > 7,
-        onPanResponderMove: Animated.event([null, { dx: card.x, dy: card.y }], {
-          useNativeDriver: false,
-        }),
-        onPanResponderRelease: (_, gesture) =>
-          gesture.dx > 85
-            ? advance("SAVE")
-            : gesture.dx < -85
-              ? advance("PASS")
-              : Animated.spring(card, {
-                  toValue: { x: 0, y: 0 },
-                  useNativeDriver: true,
-                  speed: 18,
-                  bounciness: 7,
-                }).start(),
+    () => Gesture.Pan()
+      .activeOffsetX([-8, 8])
+      .onUpdate((event) => {
+        translateX.value = event.translationX;
+        translateY.value = event.translationY * 0.18;
+      })
+      .onEnd((event) => {
+        if (event.translationX > 85) {
+          translateX.value = withTiming(520, { duration: 190 }, (finished) => finished && runOnJS(finishSwipe)("SAVE"));
+          translateY.value = withTiming(28, { duration: 190 });
+        } else if (event.translationX < -85) {
+          translateX.value = withTiming(-520, { duration: 190 }, (finished) => finished && runOnJS(finishSwipe)("PASS"));
+          translateY.value = withTiming(28, { duration: 190 });
+        } else {
+          translateX.value = withSpring(0, { damping: 15, stiffness: 190 });
+          translateY.value = withSpring(0, { damping: 15, stiffness: 190 });
+        }
       }),
     [item?.id, selectedVibes],
   );
-  const tilt = card.x.interpolate({
-    inputRange: [-250, 0, 250],
-    outputRange: ["-10deg", "0deg", "10deg"],
-  });
-  const saveOpacity = card.x.interpolate({
-    inputRange: [0, 55, 120],
-    outputRange: [0, 0.55, 1],
-    extrapolate: "clamp",
-  });
-  const passOpacity = card.x.interpolate({
-    inputRange: [-120, -55, 0],
-    outputRange: [1, 0.55, 0],
-    extrapolate: "clamp",
-  });
+  const deckMotion = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      { rotate: `${interpolate(translateX.value, [-250, 0, 250], [-10, 0, 10], Extrapolation.CLAMP)}deg` },
+    ],
+  }));
+  const saveStampMotion = useAnimatedStyle(() => ({ opacity: interpolate(translateX.value, [0, 55, 120], [0, 0.55, 1], Extrapolation.CLAMP) }));
+  const passStampMotion = useAnimatedStyle(() => ({ opacity: interpolate(translateX.value, [-120, -55, 0], [1, 0.55, 0], Extrapolation.CLAMP) }));
   if (!item) {
     return (
       <View style={styles.swipePage}>
@@ -1375,42 +1317,31 @@ function SwipeDeck({
             </>
           )}
         </View>
-        <Animated.View
-          {...pan.panHandlers}
-          style={[
-            styles.deckCard,
-            {
-              transform: [
-                { translateX: card.x },
-                { translateY: card.y },
-                { rotate: tilt },
-              ],
-            },
-          ]}
-        >
+        <GestureDetector gesture={pan}>
+        <Reanimated.View style={[styles.deckCard, deckMotion]}>
           <Image source={{ uri: item.image }} style={styles.deckImage} />
           <LinearGradient
             colors={["transparent", "rgba(4,8,7,.96)"]}
             style={styles.posterShade}
           />
-          <Animated.View
+          <Reanimated.View
             style={[
               styles.swipeStamp,
               styles.saveStamp,
-              { opacity: saveOpacity },
+              saveStampMotion,
             ]}
           >
             <Text style={styles.saveStampText}>QUEUE</Text>
-          </Animated.View>
-          <Animated.View
+          </Reanimated.View>
+          <Reanimated.View
             style={[
               styles.swipeStamp,
               styles.passStamp,
-              { opacity: passOpacity },
+              passStampMotion,
             ]}
           >
             <Text style={styles.passStampText}>PASS</Text>
-          </Animated.View>
+          </Reanimated.View>
           <Tap onPress={() => onOpen(item)} style={styles.deckPreviewButton}>
             <Ionicons name="information" size={18} color={C.ivory} />
             <Text style={styles.deckPreviewText}>WHY</Text>
@@ -1430,7 +1361,8 @@ function SwipeDeck({
             )}
             <Text style={styles.deckNote}>{item.note}</Text>
           </View>
-        </Animated.View>
+        </Reanimated.View>
+        </GestureDetector>
       </View>
       <View style={styles.vibePanel}>
         <View style={styles.vibePanelTop}>
@@ -1577,7 +1509,7 @@ function Detail({
           <View style={styles.detailTop}>
             <Image source={{ uri: item.image }} style={styles.detailPoster} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.mediaKind}>{item.kind}</Text>
+              <Text style={[styles.mediaKind, { color: kindAccent[item.kind] }]}>{kindName[item.kind].toUpperCase()}</Text>
               <Text numberOfLines={2} style={styles.detailTitle}>{shortTitle(item.title, 48)}</Text>
               <Text style={styles.detailMeta}>
                 {item.by} · {item.year}
@@ -1622,6 +1554,21 @@ function Detail({
               <View style={styles.trackerActions}>
                 <Tap onPress={() => onUpdateTracking({ watchedOn: trackingMeta.watchedOn ? undefined : new Date().toISOString().slice(0, 10) })} style={[styles.trackerStep, trackingMeta.watchedOn && styles.trackerStepActive]}><Text style={[styles.trackerStepText, trackingMeta.watchedOn && styles.trackerStepTextActive]}>{trackingMeta.watchedOn ? "Watched" : "Watch today"}</Text></Tap>
                 <Tap onPress={() => onUpdateTracking({ rewatch: !trackingMeta.rewatch })} style={[styles.trackerStep, trackingMeta.rewatch && styles.trackerStepActive]}><Text style={[styles.trackerStepText, trackingMeta.rewatch && styles.trackerStepTextActive]}>Rewatch</Text></Tap>
+              </View>
+            </View>
+          )}
+          {(item.kind === "ALBUM" || item.kind === "GAME") && (
+            <View style={styles.trackerCard}>
+              <View style={styles.trackerTop}>
+                <View>
+                  <Text style={[styles.mediaKind, { color: kindAccent[item.kind] }]}>{item.kind === "ALBUM" ? "LISTENING LOG" : "PLAY SESSION"}</Text>
+                  <Text style={styles.trackerTitle}>{tracked ? item.kind === "ALBUM" ? "In your rotation" : "Currently playing" : item.kind === "ALBUM" ? "Save it for the right mood" : "Save it for your next session"}</Text>
+                </View>
+                <Ionicons name={kindIcon[item.kind]} size={21} color={kindAccent[item.kind]} />
+              </View>
+              <View style={styles.trackerActions}>
+                <Tap onPress={onTrack} style={[styles.trackerStep, tracked && styles.trackerStepActive]}><Text style={[styles.trackerStepText, tracked && styles.trackerStepTextActive]}>{tracked ? "Tracking" : item.kind === "ALBUM" ? "Add to rotation" : "Start playing"}</Text></Tap>
+                <Tap onPress={onComplete} style={styles.trackerStep}><Text style={styles.trackerStepText}>{item.kind === "ALBUM" ? "Played it" : "Finished it"}</Text></Tap>
               </View>
             </View>
           )}
@@ -2058,6 +2005,7 @@ const styles = StyleSheet.create({
   },
   posterTypeRail: { position: "absolute", top: 0, left: 11, right: 11, height: 3, borderBottomLeftRadius: 3, borderBottomRightRadius: 3 },
   posterShade: { ...StyleSheet.absoluteFill },
+  posterTint: { ...StyleSheet.absoluteFill },
   posterInfo: { position: "absolute", left: 10, right: 9, bottom: 9 },
   mediaKind: {
     color: C.teal,
@@ -2222,6 +2170,10 @@ const styles = StyleSheet.create({
   searchResults: { gap: 9 },
   searchCardGrid: { flexDirection: "row", flexWrap: "wrap", gap: 11 },
   searchCard: { width: "48%", height: 244, overflow: "hidden", borderRadius: 18, backgroundColor: C.surface },
+  searchSkeleton: { width: "48%", height: 244, borderRadius: 18, backgroundColor: C.surface, justifyContent: "flex-end", padding: 12, gap: 7 },
+  searchSkeletonLine: { height: 12, borderRadius: 6, width: "78%", backgroundColor: C.surface2 },
+  searchSkeletonShort: { width: "48%", height: 8 },
+  searchZero: { width: "100%", minHeight: 180, alignItems: "center", justifyContent: "center", paddingHorizontal: 30 },
   searchCardImage: { width: "100%", height: "100%", backgroundColor: C.surface2 },
   searchCardInfo: { position: "absolute", left: 11, right: 10, bottom: 11 },
   searchRow: {
