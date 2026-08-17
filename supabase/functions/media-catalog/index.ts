@@ -18,6 +18,7 @@ type TmdbItem = Record<string, unknown>;
 type GoogleBooksResponse = { items?: TmdbItem[] };
 type RawgResponse = { results?: TmdbItem[] };
 type MusicBrainzResponse = { "release-groups"?: TmdbItem[] };
+type CachedResults = { results: TmdbItem[] };
 
 async function upstreamFetch(input: string | URL, init: RequestInit = {}) {
   try {
@@ -29,6 +30,41 @@ async function upstreamFetch(input: string | URL, init: RequestInit = {}) {
     console.error("Upstream catalogue request failed", error);
     return null;
   }
+}
+
+function adminClient() {
+  const keys = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}");
+  const key = keys.default;
+  if (!key) return null;
+  return createClient(Deno.env.get("SUPABASE_URL") ?? "", key);
+}
+
+async function cachedResults<T>(cacheKey: string, ttlSeconds: number, load: () => Promise<T[]>) {
+  const admin = adminClient();
+  if (admin) {
+    const { data } = await admin
+      .from("catalog_cache")
+      .select("payload")
+      .eq("cache_key", cacheKey)
+      .gt("expires_at", new Date().toISOString())
+      .maybeSingle();
+    const cached = data?.payload as CachedResults | undefined;
+    if (cached && Array.isArray(cached.results)) return cached.results as T[];
+  }
+  const results = await load();
+  if (admin && results.length) {
+    await admin.from("catalog_cache").upsert({
+      cache_key: cacheKey,
+      payload: { results },
+      expires_at: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+  }
+  return results;
+}
+
+function cacheKey(...parts: string[]) {
+  return parts.map((part) => part.trim().toLowerCase().replace(/\s+/g, " ")).join(":").slice(0, 300);
 }
 
 function mediaItem(item: TmdbItem, forcedType?: "movie" | "tv") {
@@ -219,29 +255,38 @@ async function discoverAlbums() {
 async function requireUser(request: Request) {
   const auth = request.headers.get("Authorization");
   const keys = JSON.parse(Deno.env.get("SUPABASE_PUBLISHABLE_KEYS") ?? "{}");
-  if (!auth || !keys.default) return false;
+  if (!auth || !keys.default) return null;
   const client = createClient(Deno.env.get("SUPABASE_URL") ?? "", keys.default, {
     global: { headers: { Authorization: auth } },
   });
   const token = auth.replace("Bearer ", "");
   const { data, error } = await client.auth.getUser(token);
-  return Boolean(data.user && !error);
+  return data.user && !error ? data.user.id : null;
+}
+
+async function hasCatalogQuota(userId: string) {
+  const admin = adminClient();
+  if (!admin) return false;
+  const { data, error } = await admin.rpc("consume_catalog_quota", { p_user_id: userId });
+  return !error && data === true;
 }
 
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (request.method !== "GET") return Response.json({ error: "Method not allowed" }, { status: 405, headers: corsHeaders });
-  if (!(await requireUser(request))) return Response.json({ error: "Sign in required" }, { status: 401, headers: corsHeaders });
+  const userId = await requireUser(request);
+  if (!userId) return Response.json({ error: "Sign in required" }, { status: 401, headers: corsHeaders });
+  if (!(await hasCatalogQuota(userId))) return Response.json({ error: "Please slow down and try again in a minute." }, { status: 429, headers: corsHeaders });
 
   const url = new URL(request.url);
   const action = url.searchParams.get("action") ?? "discover";
   if (action === "games") {
-    const games = await discoverGames();
+    const games = await cachedResults("games:trending", 900, discoverGames);
     if (!games.length) return Response.json({ error: "Games are unavailable" }, { status: 502, headers: corsHeaders });
     return Response.json({ results: games }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
   }
   if (action === "albums") {
-    const albums = await discoverAlbums();
+    const albums = await cachedResults("albums:trending", 900, discoverAlbums);
     if (!albums.length) return Response.json({ error: "Albums are unavailable" }, { status: 502, headers: corsHeaders });
     return Response.json({ results: albums }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
   }
@@ -252,10 +297,14 @@ Deno.serve(async (request) => {
   const headers = { Authorization: `Bearer ${token}`, Accept: "application/json" };
 
   if (action === "discover") {
-    const upstream = await upstreamFetch(`${TMDB}/trending/all/week?language=en-US&page=${page}`, { headers });
-    if (!upstream?.ok) return Response.json({ results: [] }, { status: 502, headers: corsHeaders });
-    const data = (await upstream.json()) as { results?: TmdbItem[] };
-    return Response.json({ results: (data.results ?? []).filter((item) => item.media_type === "movie" || item.media_type === "tv").map(mediaItem) }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
+    const results = await cachedResults(cacheKey("discover", String(page)), 900, async () => {
+      const upstream = await upstreamFetch(`${TMDB}/trending/all/week?language=en-US&page=${page}`, { headers });
+      if (!upstream?.ok) return [];
+      const data = (await upstream.json()) as { results?: TmdbItem[] };
+      return (data.results ?? []).filter((item) => item.media_type === "movie" || item.media_type === "tv").map(mediaItem);
+    });
+    if (!results.length) return Response.json({ results: [] }, { status: 502, headers: corsHeaders });
+    return Response.json({ results }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=900" } });
   }
 
   if (action === "search") {
@@ -266,31 +315,33 @@ Deno.serve(async (request) => {
       return Response.json({ error: "An unsupported media type was requested" }, { status: 400, headers: corsHeaders });
     }
     if (requestedKind === "BOOK") {
-      const books = await searchBooks(query, 16);
+      const books = await cachedResults(cacheKey("search", "book", query), 3_600, () => searchBooks(query, 16));
       return Response.json({ results: books }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
     }
     if (requestedKind === "GAME") {
-      const games = await searchGames(query);
+      const games = await cachedResults(cacheKey("search", "game", query), 3_600, () => searchGames(query));
       return Response.json({ results: games }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
     }
     if (requestedKind === "ALBUM") {
-      const albums = await searchAlbums(query);
+      const albums = await cachedResults(cacheKey("search", "album", query), 3_600, () => searchAlbums(query));
       return Response.json({ results: albums }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
     }
     const endpoint = requestedKind === "FILM" ? "movie" : requestedKind === "SHOW" ? "tv" : "multi";
-    const upstream = await upstreamFetch(`${TMDB}/search/${endpoint}?query=${encodeURIComponent(query)}&include_adult=false&language=en-US`, { headers });
-    const data = upstream?.ok ? (await upstream.json()) as { results?: TmdbItem[] } : { results: [] };
-    const screenResults = (data.results ?? [])
-      .filter((item) => endpoint !== "multi" || item.media_type === "movie" || item.media_type === "tv")
-      .slice(0, 12)
-      .map((item) => mediaItem(item, requestedKind === "FILM" ? "movie" : requestedKind === "SHOW" ? "tv" : undefined));
-    if (!upstream?.ok) return Response.json({ error: "Media search is unavailable" }, { status: 502, headers: corsHeaders });
+    const screenResults = await cachedResults(cacheKey("search", requestedKind, query), 3_600, async () => {
+      const upstream = await upstreamFetch(`${TMDB}/search/${endpoint}?query=${encodeURIComponent(query)}&include_adult=false&language=en-US`, { headers });
+      if (!upstream?.ok) return [];
+      const data = (await upstream.json()) as { results?: TmdbItem[] };
+      return (data.results ?? [])
+        .filter((item) => endpoint !== "multi" || item.media_type === "movie" || item.media_type === "tv")
+        .slice(0, 12)
+        .map((item) => mediaItem(item, requestedKind === "FILM" ? "movie" : requestedKind === "SHOW" ? "tv" : undefined));
+    });
     return Response.json({ results: screenResults }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
   }
 
   if (action === "books") {
     const query = url.searchParams.get("q")?.trim() || "subject:fiction";
-    const books = await searchBooks(query, 20);
+    const books = await cachedResults(cacheKey("books", query), 3_600, () => searchBooks(query, 20));
     if (!books.length) return Response.json({ error: "Books are unavailable" }, { status: 502, headers: corsHeaders });
     return Response.json({ results: books }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
   }
